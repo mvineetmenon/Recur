@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # Central Server
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./recur.db
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./server:/app/server
+      - ./configs:/app/configs:ro
+    command: python server/app/main.py
+    networks:
+      - recur-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # PostgreSQL (Optional, for production)
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: recur
+      POSTGRES_USER: recur
+      POSTGRES_PASSWORD: recur-dev-password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - recur-network
+    profiles:
+      - production
+
+  # Redis (Optional, for caching)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - recur-network
+    profiles:
+      - production
+
+networks:
+  recur-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

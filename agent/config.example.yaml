@@ -1,0 +1,50 @@
+# Recur Agent Configuration
+# This file defines the systems and health checks to monitor
+
+# Server connection
+# server_url: http://monitoring-server:8000
+# agent_id: prod-web-01  # Defaults to hostname if not specified
+
+system:
+  name: "My Application Stack"
+  description: "Application and its dependencies"
+  interval: 60  # seconds between checks
+  
+  tasks:
+    # Check if the application is running
+    - name: "app_health"
+      type: http
+      url: "http://localhost:8000/health"
+      expected_status: 200
+      timeout: 5
+  
+  dependencies:
+    # Database dependency
+    - name: "Database"
+      description: "PostgreSQL database server"
+      tasks:
+        - name: "postgres_port"
+          type: tcp
+          host: "localhost"
+          port: 5432
+          timeout: 3
+        
+        - name: "postgres_status"
+          type: command
+          command: "pg_isready -h localhost"
+          timeout: 5
+    
+    # Cache dependency
+    - name: "Cache"
+      description: "Redis cache"
+      tasks:
+        - name: "redis_port"
+          type: tcp
+          host: "localhost"
+          port: 6379
+          timeout: 3
+        
+        - name: "redis_ping"
+          type: command
+          command: "redis-cli ping | grep PONG"
+          timeout: 5

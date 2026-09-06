@@ -1,0 +1,20 @@
+# Simple Website Monitoring Configuration
+# This is a basic example configuration for monitoring a single website
+
+system:
+  name: "Website"
+  description: "Public website endpoint monitoring"
+  interval: 60  # Check every 60 seconds
+  
+  tasks:
+    - name: "homepage"
+      type: http
+      url: "https://example.com/"
+      expected_status: 200
+      timeout: 5
+    
+    - name: "api_endpoint"
+      type: http
+      url: "https://api.example.com/v1/health"
+      expected_status: 200
+      timeout: 5

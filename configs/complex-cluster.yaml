@@ -1,0 +1,131 @@
+# Complex Multi-Tier Cluster Configuration
+# This is a production-like example with nested dependencies
+
+system:
+  name: "Production Cluster"
+  description: "Full production environment with nested dependencies"
+  interval: 60
+  
+  tasks:
+    - name: "cluster_ping"
+      type: ping
+      host: "cluster.example.com"
+      timeout: 2
+  
+  dependencies:
+    
+    # Web Tier
+    - name: "Web Tier"
+      interval: 30
+      description: "Frontend and API servers"
+      tasks:
+        - name: "nginx_primary"
+          type: http
+          url: "http://web1.internal:8080/health"
+          expected_status: 200
+          timeout: 5
+        
+        - name: "api_server"
+          type: http
+          url: "https://api.example.com/v1/health"
+          expected_status: 200
+          timeout: 10
+      
+      dependencies:
+        - name: "SSL Certificates"
+          description: "Certificate validation"
+          tasks:
+            - name: "cert_validation"
+              type: command
+              command: "openssl s_client -connect api.example.com:443 </dev/null 2>/dev/null | openssl x509 -noout -dates | grep 'notAfter'"
+              timeout: 10
+    
+    # Database Layer
+    - name: "Database Layer"
+      interval: 45
+      description: "Database servers and replication"
+      tasks:
+        - name: "postgres_primary"
+          type: tcp
+          host: "db-primary.internal"
+          port: 5432
+          timeout: 3
+        
+        - name: "postgres_replication_status"
+          type: command
+          command: "pg_isready -h db-primary.internal"
+          timeout: 5
+      
+      dependencies:
+        - name: "Cache Layer"
+          description: "Redis cache cluster"
+          tasks:
+            - name: "redis_primary"
+              type: tcp
+              host: "redis-primary.internal"
+              port: 6379
+              timeout: 3
+            
+            - name: "redis_check"
+              type: command
+              command: "redis-cli -h redis-primary.internal ping | grep PONG"
+              timeout: 5
+          
+          dependencies:
+            - name: "Redis Persistence"
+              tasks:
+                - name: "rdb_file_check"
+                  type: command
+                  command: "test -f /data/dump.rdb && test -w /data"
+        
+        - name: "Backup Storage"
+          description: "S3-compatible backup storage"
+          tasks:
+            - name: "s3_health"
+              type: http
+              url: "http://minio.internal:9000/minio/health/live"
+              timeout: 5
+            
+            - name: "s3_connectivity"
+              type: tcp
+              host: "minio.internal"
+              port: 9000
+              timeout: 3
+    
+    # Message Queue
+    - name: "Message Queue"
+      description: "Message broker cluster"
+      tasks:
+        - name: "rabbitmq_health"
+          type: http
+          url: "http://rabbitmq.internal:15672/api/healthchecks/node"
+          timeout: 5
+        
+        - name: "rabbitmq_port"
+          type: tcp
+          host: "rabbitmq.internal"
+          port: 5672
+          timeout: 3
+      
+      dependencies:
+        - name: "Queue Persistence"
+          tasks:
+            - name: "mnesia_database"
+              type: command
+              command: "test -d /var/lib/rabbitmq/mnesia"
+    
+    # Monitoring Stack
+    - name: "Monitoring Stack"
+      description: "Prometheus and alerting"
+      tasks:
+        - name: "prometheus_health"
+          type: http
+          url: "http://prometheus.internal:9090/-/healthy"
+          expected_status: 200
+          timeout: 5
+        
+        - name: "alertmanager_health"
+          type: http
+          url: "http://alertmanager.internal:9093/-/healthy"
+          expected_status: 200
+          timeout: 5

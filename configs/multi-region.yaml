@@ -1,0 +1,188 @@
+# Multi-Region Monitoring Configuration
+# Example of monitoring systems across multiple geographic regions
+
+system:
+  name: "Global Infrastructure"
+  description: "Multi-region deployment across US, EU, and APAC"
+  interval: 60
+  
+  tasks:
+    - name: "global_dns"
+      type: http
+      url: "https://dns.example.com/health"
+      expected_status: 200
+      timeout: 10
+  
+  dependencies:
+    
+    # US Region
+    - name: "US Region"
+      interval: 30
+      description: "US-East and US-West data centers"
+      
+      dependencies:
+        - name: "US-East"
+          description: "US-East primary data center"
+          tasks:
+            - name: "us_east_api"
+              type: http
+              url: "https://api-us-east.example.com/health"
+              expected_status: 200
+              timeout: 5
+            
+            - name: "us_east_db"
+              type: tcp
+              host: "db-us-east.internal"
+              port: 5432
+              timeout: 3
+          
+          dependencies:
+            - name: "US-East Cache"
+              tasks:
+                - name: "redis_us_east"
+                  type: tcp
+                  host: "cache-us-east.internal"
+                  port: 6379
+                  timeout: 3
+        
+        - name: "US-West"
+          description: "US-West backup data center"
+          tasks:
+            - name: "us_west_api"
+              type: http
+              url: "https://api-us-west.example.com/health"
+              expected_status: 200
+              timeout: 5
+            
+            - name: "us_west_db"
+              type: tcp
+              host: "db-us-west.internal"
+              port: 5432
+              timeout: 3
+    
+    # EU Region
+    - name: "EU Region"
+      interval: 30
+      description: "European data centers"
+      
+      dependencies:
+        - name: "EU-Central"
+          description: "EU-Central primary"
+          tasks:
+            - name: "eu_api"
+              type: http
+              url: "https://api-eu.example.com/health"
+              expected_status: 200
+              timeout: 5
+            
+            - name: "eu_db"
+              type: tcp
+              host: "db-eu.internal"
+              port: 5432
+              timeout: 3
+          
+          dependencies:
+            - name: "EU Cache"
+              tasks:
+                - name: "redis_eu"
+                  type: tcp
+                  host: "cache-eu.internal"
+                  port: 6379
+                  timeout: 3
+    
+    # APAC Region
+    - name: "APAC Region"
+      interval: 30
+      description: "Asia-Pacific data centers"
+      
+      tasks:
+        - name: "apac_general_health"
+          type: http
+          url: "https://monitoring-apac.internal/health"
+          expected_status: 200
+          timeout: 10
+      
+      dependencies:
+        - name: "APAC-SG"
+          description: "Singapore hub"
+          tasks:
+            - name: "sg_api"
+              type: http
+              url: "https://api-sg.example.com/health"
+              expected_status: 200
+              timeout: 5
+            
+            - name: "sg_db"
+              type: tcp
+              host: "db-sg.internal"
+              port: 5432
+              timeout: 3
+        
+        - name: "APAC-JP"
+          description: "Tokyo hub"
+          tasks:
+            - name: "jp_api"
+              type: http
+              url: "https://api-jp.example.com/health"
+              expected_status: 200
+              timeout: 5
+            
+            - name: "jp_db"
+              type: tcp
+              host: "db-jp.internal"
+              port: 5432
+              timeout: 3
+    
+    # Shared Services
+    - name: "Shared Services"
+      description: "Cross-region shared infrastructure"
+      
+      dependencies:
+        - name: "Authentication Service"
+          tasks:
+            - name: "auth_api"
+              type: http
+              url: "https://auth.example.com/health"
+              expected_status: 200
+              timeout: 5
+            
+            - name: "auth_db"
+              type: tcp
+              host: "auth-db.internal"
+              port: 5432
+              timeout: 3
+        
+        - name: "Message Queue"
+          tasks:
+            - name: "rabbitmq"
+              type: http
+              url: "http://rabbitmq.internal:15672/api/healthchecks/node"
+              timeout: 5
+            
+            - name: "rabbitmq_port"
+              type: tcp
+              host: "rabbitmq.internal"
+              port: 5672
+              timeout: 3
+        
+        - name: "Logging Stack"
+          tasks:
+            - name: "elasticsearch"
+              type: http
+              url: "http://elasticsearch.internal:9200/_cluster/health"
+              expected_status: 200
+              timeout: 10
+            
+            - name: "kibana"
+              type: http
+              url: "http://kibana.internal:5601/api/status"
+              expected_status: 200
+              timeout: 5
+        
+        - name: "CDN & Caching"
+          tasks:
+            - name: "cdn_health"
+              type: http
+              url: "https://cdn-api.example.com/health"
+              expected_status: 200
+              timeout: 5
