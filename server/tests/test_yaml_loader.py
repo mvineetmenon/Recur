@@ -2,9 +2,10 @@
 Tests for YAML configuration loader
 """
 
-import pytest
 import tempfile
 from pathlib import Path
+
+import pytest
 
 from server.app.utils.yaml_loader import (
     YAMLConfigError,
@@ -20,14 +21,16 @@ class TestYAMLLoader:
     def test_load_valid_yaml(self):
         """Test loading a valid YAML file"""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write("""
+            f.write(
+                """
 system:
   name: Test System
   tasks:
     - name: test
       type: http
       url: http://localhost/health
-""")
+"""
+            )
             f.flush()
 
             config = load_yaml_file(f.name)
@@ -53,7 +56,7 @@ system:
                         "type": "http",
                         "url": "http://localhost/health",
                     }
-                ]
+                ],
             }
         }
 
@@ -62,11 +65,7 @@ system:
 
     def test_validate_system_config_missing_name(self):
         """Test validation fails without system name"""
-        config = {
-            "system": {
-                "tasks": []
-            }
-        }
+        config = {"system": {"tasks": []}}
 
         with pytest.raises(YAMLConfigError):
             validate_system_config(config)
@@ -130,7 +129,7 @@ system:
                         "name": "test",
                         "type": "invalid_type",
                     }
-                ]
+                ],
             }
         }
 

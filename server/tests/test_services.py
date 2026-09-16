@@ -197,12 +197,20 @@ class TestSystemManager:
         }
 
         SystemManager.register_system(
-            system_id="idem", name="Parent", description=None, config=config,
-            db=test_db, agent_id=agent_setup,
+            system_id="idem",
+            name="Parent",
+            description=None,
+            config=config,
+            db=test_db,
+            agent_id=agent_setup,
         )
         SystemManager.register_system(
-            system_id="idem", name="Parent2", description=None, config=config,
-            db=test_db, agent_id=agent_setup,
+            system_id="idem",
+            name="Parent2",
+            description=None,
+            config=config,
+            db=test_db,
+            agent_id=agent_setup,
         )
 
         children = test_db.query(System).filter(System.system_id.like("idem/%")).all()
@@ -316,11 +324,14 @@ class TestSystemManager:
 
         from server.app.models import SystemDependency
 
-        orphans = test_db.query(SystemDependency).filter(
-            SystemDependency.child_system_id == test_db.query(System).filter(
-                System.system_id == "test-del/child"
-            ).first().id
-        ).all()
+        orphans = (
+            test_db.query(SystemDependency)
+            .filter(
+                SystemDependency.child_system_id
+                == test_db.query(System).filter(System.system_id == "test-del/child").first().id
+            )
+            .all()
+        )
         assert orphans == []
 
     def test_delete_system_not_found(self, test_db):

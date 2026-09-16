@@ -11,19 +11,15 @@ import sys
 
 import pytest
 
-AGENT_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "agent")
-)
+AGENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agent"))
 if AGENT_DIR not in sys.path:
     sys.path.insert(0, AGENT_DIR)
 
-import health_check_utils as hcu  # noqa: E402
+import health_check_utils as hcu  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _proc(returncode=0, stdout=""):
-    return subprocess.CompletedProcess(
-        args=[], returncode=returncode, stdout=stdout, stderr=""
-    )
+    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr="")
 
 
 def _make_run(*results):
@@ -47,28 +43,43 @@ def config_path(tmp_path):
             "name": "Test System",
             "interval": 45,
             "tasks": [
-                {"name": "http_ok", "type": "http", "url": "http://a/",
-                 "expected_status": 200, "timeout": 2},
-                {"name": "https_bad", "type": "https", "url": "https://b/",
-                 "expected_status": 200, "timeout": 2},
-                {"name": "tcp_ok", "type": "tcp", "host": "127.0.0.1",
-                 "port": 5432, "timeout": 2},
-                {"name": "ping_ok", "type": "ping", "host": "127.0.0.1",
-                 "timeout": 2},
-                {"name": "cmd_ok", "type": "command", "command": "true",
-                 "timeout": 2},
-                {"name": "script_ok", "type": "script", "path": str(
-                    tmp_path / "ok.sh"), "timeout": 2},
-                {"name": "flaky", "type": "command", "command": "flaky",
-                 "timeout": 2, "max_retries": 2},
+                {
+                    "name": "http_ok",
+                    "type": "http",
+                    "url": "http://a/",
+                    "expected_status": 200,
+                    "timeout": 2,
+                },
+                {
+                    "name": "https_bad",
+                    "type": "https",
+                    "url": "https://b/",
+                    "expected_status": 200,
+                    "timeout": 2,
+                },
+                {"name": "tcp_ok", "type": "tcp", "host": "127.0.0.1", "port": 5432, "timeout": 2},
+                {"name": "ping_ok", "type": "ping", "host": "127.0.0.1", "timeout": 2},
+                {"name": "cmd_ok", "type": "command", "command": "true", "timeout": 2},
+                {
+                    "name": "script_ok",
+                    "type": "script",
+                    "path": str(tmp_path / "ok.sh"),
+                    "timeout": 2,
+                },
+                {
+                    "name": "flaky",
+                    "type": "command",
+                    "command": "flaky",
+                    "timeout": 2,
+                    "max_retries": 2,
+                },
                 {"name": "unknown_type", "type": "warp", "timeout": 2},
             ],
             "dependencies": [
                 {
                     "name": "Nested Dep",
                     "tasks": [
-                        {"name": "dep_task", "type": "command",
-                         "command": "dep", "timeout": 2},
+                        {"name": "dep_task", "type": "command", "command": "dep", "timeout": 2},
                     ],
                 },
             ],
@@ -126,16 +137,12 @@ class TestTaskTypes:
 
     def test_tcp_success(self, config_path, monkeypatch):
         agent = _agent(config_path, monkeypatch, _proc(0))
-        result = agent._execute_task(
-            {"name": "t", "type": "tcp", "host": "127.0.0.1", "port": 1}
-        )
+        result = agent._execute_task({"name": "t", "type": "tcp", "host": "127.0.0.1", "port": 1})
         assert result["status"] == "UP"
 
     def test_tcp_failure(self, config_path, monkeypatch):
         agent = _agent(config_path, monkeypatch, _proc(1))
-        result = agent._execute_task(
-            {"name": "t", "type": "tcp", "host": "127.0.0.1", "port": 1}
-        )
+        result = agent._execute_task({"name": "t", "type": "tcp", "host": "127.0.0.1", "port": 1})
         assert result["status"] == "DOWN"
 
     def test_tcp_missing_params(self, config_path, monkeypatch):
@@ -155,31 +162,23 @@ class TestTaskTypes:
 
     def test_command_success(self, config_path, monkeypatch):
         agent = _agent(config_path, monkeypatch, _proc(0))
-        result = agent._execute_task(
-            {"name": "c", "type": "command", "command": "true"}
-        )
+        result = agent._execute_task({"name": "c", "type": "command", "command": "true"})
         assert result["status"] == "UP"
 
     def test_command_failure(self, config_path, monkeypatch):
         agent = _agent(config_path, monkeypatch, _proc(3))
-        result = agent._execute_task(
-            {"name": "c", "type": "command", "command": "false"}
-        )
+        result = agent._execute_task({"name": "c", "type": "command", "command": "false"})
         assert result["status"] == "DOWN"
         assert "3" in result["error"]
 
     def test_script_success(self, config_path, monkeypatch):
         agent = _agent(config_path, monkeypatch, _proc(0))
-        result = agent._execute_task(
-            {"name": "s", "type": "script", "path": str(config_path)}
-        )
+        result = agent._execute_task({"name": "s", "type": "script", "path": str(config_path)})
         assert result["status"] == "UP"
 
     def test_script_failure(self, config_path, monkeypatch):
         agent = _agent(config_path, monkeypatch, _proc(1))
-        result = agent._execute_task(
-            {"name": "s", "type": "script", "path": str(config_path)}
-        )
+        result = agent._execute_task({"name": "s", "type": "script", "path": str(config_path)})
         assert result["status"] == "DOWN"
         assert "1" in result["error"]
 
@@ -202,9 +201,7 @@ class TestTaskTypes:
 
         monkeypatch.setattr(hcu.subprocess, "run", boom)
         agent = hcu.HealthCheckAgent(str(config_path), agent_id="unit-agent")
-        result = agent._execute_task(
-            {"name": "c", "type": "command", "command": "x"}
-        )
+        result = agent._execute_task({"name": "c", "type": "command", "command": "x"})
         assert result["status"] == "DOWN"
         assert "kaput" in result["error"]
 
@@ -240,9 +237,7 @@ class TestRetries:
         monkeypatch.setattr(hcu.subprocess, "run", fake)
         agent = hcu.HealthCheckAgent(str(config_path), agent_id="unit-agent")
 
-        result = agent._execute_task(
-            {"name": "c", "type": "command", "command": "x"}
-        )
+        result = agent._execute_task({"name": "c", "type": "command", "command": "x"})
         assert result["status"] == "DOWN"
         assert len(fake.calls) == 1
 
@@ -255,15 +250,15 @@ class TestRecursiveEvaluation:
         # http_ok=UP, https_bad=DOWN (500), tcp/ping/cmd/script=UP,
         # flaky=UP on first try, unknown=UNKNOWN, dep_task=UP
         fake = _make_run(
-            _proc(0, "200"),   # http_ok
-            _proc(0, "500"),   # https_bad
-            _proc(0),          # tcp_ok
-            _proc(0),          # ping_ok
-            _proc(0),          # cmd_ok
-            _proc(0),          # script_ok
-            _proc(0),          # flaky
-            _proc(0),          # unknown_type (never runs, but queued)
-            _proc(0),          # dep_task
+            _proc(0, "200"),  # http_ok
+            _proc(0, "500"),  # https_bad
+            _proc(0),  # tcp_ok
+            _proc(0),  # ping_ok
+            _proc(0),  # cmd_ok
+            _proc(0),  # script_ok
+            _proc(0),  # flaky
+            _proc(0),  # unknown_type (never runs, but queued)
+            _proc(0),  # dep_task
         )
         monkeypatch.setattr(hcu.subprocess, "run", fake)
         agent = hcu.HealthCheckAgent(str(config_path), agent_id="unit-agent")
@@ -288,14 +283,18 @@ class TestRecursiveEvaluation:
         import yaml
 
         path = tmp_path / "up.yaml"
-        path.write_text(yaml.safe_dump(
-            {"system": {
-                "name": "All Up",
-                "tasks": [
-                    {"name": "c", "type": "command", "command": "true"},
-                ],
-            }}
-        ))
+        path.write_text(
+            yaml.safe_dump(
+                {
+                    "system": {
+                        "name": "All Up",
+                        "tasks": [
+                            {"name": "c", "type": "command", "command": "true"},
+                        ],
+                    }
+                }
+            )
+        )
         fake = _make_run(_proc(0))
         monkeypatch.setattr(hcu.subprocess, "run", fake)
         agent = hcu.HealthCheckAgent(str(path), agent_id="unit-agent")

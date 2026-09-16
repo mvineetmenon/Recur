@@ -153,7 +153,7 @@ def db_with_agent(test_db):
 @pytest.fixture
 def db_with_system(db_with_agent):
     """Database session plus test agent and system"""
-    from server.app.models import System, HealthStatus
+    from server.app.models import HealthStatus, System
 
     test_db, agent = db_with_agent
 

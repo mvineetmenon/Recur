@@ -4,7 +4,7 @@ Utilities for YAML configuration loading and parsing
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import yaml
 
@@ -39,6 +39,9 @@ def load_yaml_file(path: str | Path) -> Dict[str, Any]:
 
         if config is None:
             raise YAMLConfigError("Config file is empty")
+
+        if not isinstance(config, dict):
+            raise YAMLConfigError("Config file must contain a YAML mapping")
 
         return config
     except yaml.YAMLError as e:
@@ -135,7 +138,7 @@ def flatten_config(config: Dict[str, Any], parent_key: str = "") -> Dict[str, Di
         """Recursively traverse and flatten system tree"""
         system_id = node.get("id") or node.get("name", "").lower().replace(" ", "-")
 
-        systems[system_id] = {
+        systems[cast(str, system_id)] = {
             "name": node.get("name"),
             "description": node.get("description"),
             "interval": node.get("interval", 60),
@@ -147,7 +150,7 @@ def flatten_config(config: Dict[str, Any], parent_key: str = "") -> Dict[str, Di
         for dep in node.get("dependencies", []):
             _traverse(dep, parent_id=system_id)
 
-        return system_id
+        return cast(str, system_id)
 
     if "system" in config:
         _traverse(config["system"])
@@ -165,4 +168,4 @@ def config_to_json_serializable(config: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         JSON-serializable configuration
     """
-    return json.loads(json.dumps(config, default=str))
+    return cast(Dict[str, Any], json.loads(json.dumps(config, default=str)))

@@ -74,7 +74,7 @@ class StatusEvaluator:
         """Get statuses of all tasks for a system (latest result per task)"""
         latest = StatusEvaluator._latest_results_for_tasks(system.tasks, db)
 
-        statuses = []
+        statuses: List[HealthStatus] = []
         for task in system.tasks:
             result = latest.get(task.id)
             if result:
@@ -85,9 +85,7 @@ class StatusEvaluator:
         return statuses
 
     @staticmethod
-    def _latest_results_for_tasks(
-        tasks: List[Task], db: Session
-    ) -> Dict[int, TaskResult]:
+    def _latest_results_for_tasks(tasks: List[Task], db: Session) -> Dict[int, TaskResult]:
         """
         Fetch the most recent TaskResult for each task in a single query.
 
@@ -111,13 +109,11 @@ class StatusEvaluator:
         return latest
 
     @staticmethod
-    def _get_dependency_statuses(
-        system: System, db: Session, _seen: set
-    ) -> List[HealthStatus]:
+    def _get_dependency_statuses(system: System, db: Session, _seen: set) -> List[HealthStatus]:
         """
         Recursively get statuses of all dependent systems
         """
-        statuses = []
+        statuses: List[HealthStatus] = []
 
         for dep in system.dependencies:
             child_system = dep.child_system
@@ -165,11 +161,9 @@ class StatusEvaluator:
             seen.discard(system.id)
 
     @staticmethod
-    def _build_tree(
-        system: System, db: Session, seen: set
-    ) -> Dict[str, Any]:
+    def _build_tree(system: System, db: Session, seen: set) -> Dict[str, Any]:
         """Assemble one level of the system tree (recursion stack in `seen`)"""
-        tree = {
+        tree: Dict[str, Any] = {
             "system_id": system.system_id,
             "name": system.name,
             "description": system.description,
@@ -185,25 +179,29 @@ class StatusEvaluator:
         for task in system.tasks:
             result = latest.get(task.id)
             if result:
-                tree["tasks"].append({
-                    "task_id": task.task_id,
-                    "name": task.name,
-                    "task_type": task.task_type,
-                    "status": result.status,
-                    "duration_ms": result.duration_ms,
-                    "error_message": result.error_message,
-                    "output_data": result.output_data,
-                })
+                tree["tasks"].append(
+                    {
+                        "task_id": task.task_id,
+                        "name": task.name,
+                        "task_type": task.task_type,
+                        "status": result.status,
+                        "duration_ms": result.duration_ms,
+                        "error_message": result.error_message,
+                        "output_data": result.output_data,
+                    }
+                )
             else:
-                tree["tasks"].append({
-                    "task_id": task.task_id,
-                    "name": task.name,
-                    "task_type": task.task_type,
-                    "status": HealthStatus.UNKNOWN,
-                    "duration_ms": None,
-                    "error_message": None,
-                    "output_data": None,
-                })
+                tree["tasks"].append(
+                    {
+                        "task_id": task.task_id,
+                        "name": task.name,
+                        "task_type": task.task_type,
+                        "status": HealthStatus.UNKNOWN,
+                        "duration_ms": None,
+                        "error_message": None,
+                        "output_data": None,
+                    }
+                )
 
         # Recursively add dependencies
         for dep in system.dependencies:
@@ -235,7 +233,7 @@ class StatusEvaluator:
             .order_by(TaskResult.created_at.desc())
         ).all()
 
-        task_statuses = {}
+        task_statuses: Dict[str, int] = {}
         seen_tasks = set()
 
         for result in task_results:

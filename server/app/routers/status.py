@@ -10,10 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Agent
-from ..schemas import (
-    HealthCheckResponse,
-    StatusReportRequest,
-)
+from ..schemas import HealthCheckResponse, StatusReportRequest
 from ..services.health_check import HealthCheckProcessor
 from ..utils.logger import get_logger
 
@@ -45,9 +42,8 @@ async def submit_status_report(
 
         # Get system ID from report
         system_status = report.system_status
-        system_id = (
-            system_status.get("system_id")
-            or system_status.get("name", "").lower().replace(" ", "-")
+        system_id = system_status.get("system_id") or system_status.get("name", "").lower().replace(
+            " ", "-"
         )
 
         if not system_id:

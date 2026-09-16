@@ -228,8 +228,7 @@ def _delete_agent_related(db: Session, agent: Agent) -> None:
     fails with an IntegrityError).
     """
     report_ids = [
-        row[0]
-        for row in db.query(StatusReport.id).filter(StatusReport.agent_id == agent.id).all()
+        row[0] for row in db.query(StatusReport.id).filter(StatusReport.agent_id == agent.id).all()
     ]
     if report_ids:
         db.query(TaskResult).filter(TaskResult.status_report_id.in_(report_ids)).delete(

@@ -152,9 +152,7 @@ class TestAgentRoutes:
                     "system_id": "del-report-sys",
                     "name": "Del Report Sys",
                     "status": "UP",
-                    "tasks": [
-                        {"task_id": "t1", "name": "t1", "type": "http", "status": "UP"}
-                    ],
+                    "tasks": [{"task_id": "t1", "name": "t1", "type": "http", "status": "UP"}],
                 },
             },
         )
@@ -168,9 +166,7 @@ class TestAgentRoutes:
         system_after = client.get("/api/v1/systems/del-report-sys")
         assert system_after.status_code == 200
         assert system_after.json()["agent_id"] is None
-        assert (
-            client.get("/api/v1/systems/del-report-sys/history").status_code == 404
-        )
+        assert client.get("/api/v1/systems/del-report-sys/history").status_code == 404
 
 
 class TestSystemRoutes:
@@ -289,9 +285,7 @@ class TestSystemRoutes:
                     "dependencies": [
                         {
                             "name": "Child",
-                            "tasks": [
-                                {"name": "c-task", "type": "tcp", "host": "x", "port": 1}
-                            ],
+                            "tasks": [{"name": "c-task", "type": "tcp", "host": "x", "port": 1}],
                         }
                     ],
                 },
@@ -409,8 +403,10 @@ class TestStatusRoutes:
                     "name": "Test",
                     "tasks": [
                         {
-                            "name": "s-task", "type": "http",
-                            "url": "http://x", "expected_status": 200,
+                            "name": "s-task",
+                            "type": "http",
+                            "url": "http://x",
+                            "expected_status": 200,
                         }
                     ],
                 },

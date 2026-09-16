@@ -47,8 +47,7 @@ class TestFullNestedFlow:
         config = {
             "name": "Web Stack",
             "tasks": [
-                {"name": "web", "type": "http", "url": "http://web/",
-                 "expected_status": 200},
+                {"name": "web", "type": "http", "url": "http://web/", "expected_status": 200},
             ],
             "dependencies": [
                 {
@@ -60,8 +59,7 @@ class TestFullNestedFlow:
                         {
                             "name": "Disk",
                             "tasks": [
-                                {"name": "disk", "type": "command",
-                                 "command": "df -h"},
+                                {"name": "disk", "type": "command", "command": "df -h"},
                             ],
                         },
                     ],
@@ -85,9 +83,7 @@ class TestFullNestedFlow:
         early_tree = client.get("/api/v1/systems/webstack/tree").json()
         child_ids = [d["system_id"] for d in early_tree["dependencies"]]
         assert "webstack/db" in child_ids
-        grandchild_ids = [
-            d["system_id"] for d in early_tree["dependencies"][0]["dependencies"]
-        ]
+        grandchild_ids = [d["system_id"] for d in early_tree["dependencies"][0]["dependencies"]]
         assert "webstack/db/disk" in grandchild_ids
 
         # 3. Submit a nested report: web UP, pg DOWN (the failing leaf)
@@ -101,8 +97,13 @@ class TestFullNestedFlow:
                     "name": "Web Stack",
                     "status": "DOWN",
                     "tasks": [
-                        {"task_id": "web", "name": "web", "type": "http",
-                         "status": "UP", "duration_ms": 12.0},
+                        {
+                            "task_id": "web",
+                            "name": "web",
+                            "type": "http",
+                            "status": "UP",
+                            "duration_ms": 12.0,
+                        },
                     ],
                     "dependencies": [
                         {
@@ -110,9 +111,14 @@ class TestFullNestedFlow:
                             "name": "DB",
                             "status": "DOWN",
                             "tasks": [
-                                {"task_id": "pg", "name": "pg", "type": "tcp",
-                                 "status": "DOWN", "error": "connection refused",
-                                 "duration_ms": 500.0},
+                                {
+                                    "task_id": "pg",
+                                    "name": "pg",
+                                    "type": "tcp",
+                                    "status": "DOWN",
+                                    "error": "connection refused",
+                                    "duration_ms": 500.0,
+                                },
                             ],
                             "dependencies": [
                                 {
@@ -120,8 +126,12 @@ class TestFullNestedFlow:
                                     "name": "Disk",
                                     "status": "UP",
                                     "tasks": [
-                                        {"task_id": "disk", "name": "disk",
-                                         "type": "command", "status": "UP"},
+                                        {
+                                            "task_id": "disk",
+                                            "name": "disk",
+                                            "type": "command",
+                                            "status": "UP",
+                                        },
                                     ],
                                 },
                             ],
@@ -185,8 +195,14 @@ class TestDockerComposeSmoke:
 
     @classmethod
     def _compose_args(cls):
-        compose = ["docker", "compose", "-p", cls.PROJECT,
-                   "-f", str(REPO_ROOT / "docker-compose.yml")]
+        compose = [
+            "docker",
+            "compose",
+            "-p",
+            cls.PROJECT,
+            "-f",
+            str(REPO_ROOT / "docker-compose.yml"),
+        ]
         # Offline LAN environments: use the local-registry base image
         if os.environ.get("RECUR_LAN_DOCKER") == "1":
             compose += ["-f", str(REPO_ROOT / "docker-compose.lan.yml")]
@@ -196,7 +212,9 @@ class TestDockerComposeSmoke:
     def setup_class(cls):
         result = subprocess.run(
             cls._compose_args() + ["up", "-d", "--build"],
-            capture_output=True, text=True, timeout=600,
+            capture_output=True,
+            text=True,
+            timeout=600,
         )
         if result.returncode != 0:
             pytest.skip(f"docker compose up failed: {result.stderr[-2000:]}")
@@ -207,7 +225,8 @@ class TestDockerComposeSmoke:
         while time.time() < deadline:
             probe = subprocess.run(
                 ["curl", "-sf", cls.BASE_URL + "/api/v1/health"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             if probe.returncode == 0:
                 return
@@ -219,21 +238,23 @@ class TestDockerComposeSmoke:
     def teardown_class(cls):
         subprocess.run(
             cls._compose_args() + ["down", "-v", "--remove-orphans"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
 
     def test_health(self):
         probe = subprocess.run(
             ["curl", "-sf", self.BASE_URL + "/api/v1/health"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert probe.returncode == 0
         assert "healthy" in probe.stdout
 
     def test_register_report_tree(self):
         def curl(args, data=None):
-            cmd = ["curl", "-sf", "-X", "POST",
-                   "-H", "Content-Type: application/json"]
+            cmd = ["curl", "-sf", "-X", "POST", "-H", "Content-Type: application/json"]
             if data is not None:
                 cmd += ["-d", data]
             cmd += args
@@ -241,51 +262,63 @@ class TestDockerComposeSmoke:
 
         register = curl(
             [self.BASE_URL + "/api/v1/agents/register"],
-            data='{"agent_id": "smoke-agent", "hostname": "smoke", '
-                 '"ip_address": "127.0.0.1"}',
+            data='{"agent_id": "smoke-agent", "hostname": "smoke", ' '"ip_address": "127.0.0.1"}',
         )
         assert register.returncode == 0
         agent_db_id = json.loads(register.stdout)["id"]
 
         create = curl(
             [self.BASE_URL + "/api/v1/systems"],
-            data=json.dumps({
-                "system_id": "smoke-sys",
-                "name": "Smoke",
-                "agent_id": agent_db_id,
-                "config": {
+            data=json.dumps(
+                {
+                    "system_id": "smoke-sys",
                     "name": "Smoke",
-                    "tasks": [
-                        {"name": "api", "type": "http",
-                         "url": self.BASE_URL + "/api/v1/health"},
-                    ],
-                },
-            }),
+                    "agent_id": agent_db_id,
+                    "config": {
+                        "name": "Smoke",
+                        "tasks": [
+                            {
+                                "name": "api",
+                                "type": "http",
+                                "url": self.BASE_URL + "/api/v1/health",
+                            },
+                        ],
+                    },
+                }
+            ),
         )
         assert create.returncode == 0
 
         report = curl(
             [self.BASE_URL + "/api/v1/status"],
-            data=json.dumps({
-                "agent_id": "smoke-agent",
-                "timestamp": _now(),
-                "system_status": {
-                    "system_id": "smoke-sys",
-                    "name": "Smoke",
-                    "status": "UP",
-                    "tasks": [
-                        {"task_id": "api", "name": "api", "type": "http",
-                         "status": "UP", "duration_ms": 3.0},
-                    ],
-                },
-            }),
+            data=json.dumps(
+                {
+                    "agent_id": "smoke-agent",
+                    "timestamp": _now(),
+                    "system_status": {
+                        "system_id": "smoke-sys",
+                        "name": "Smoke",
+                        "status": "UP",
+                        "tasks": [
+                            {
+                                "task_id": "api",
+                                "name": "api",
+                                "type": "http",
+                                "status": "UP",
+                                "duration_ms": 3.0,
+                            },
+                        ],
+                    },
+                }
+            ),
         )
         assert report.returncode == 0
         assert "accepted" in report.stdout
 
         tree = subprocess.run(
             ["curl", "-sf", self.BASE_URL + "/api/v1/systems/smoke-sys/tree"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert tree.returncode == 0
         parsed = json.loads(tree.stdout)

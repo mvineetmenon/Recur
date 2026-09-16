@@ -196,8 +196,10 @@ class TestAgentModel:
     def test_agent_status_enum(self, test_db):
         """Test agent status enum values"""
         all_statuses = [
-            HealthStatus.UP, HealthStatus.DOWN,
-            HealthStatus.UNKNOWN, HealthStatus.DEGRADED,
+            HealthStatus.UP,
+            HealthStatus.DOWN,
+            HealthStatus.UNKNOWN,
+            HealthStatus.DEGRADED,
         ]
         for status in all_statuses:
             agent = Agent(
@@ -689,8 +691,10 @@ class TestErrorHandling:
 
         # Valid status values should work
         valid_statuses = (
-            HealthStatus.UP, HealthStatus.DOWN,
-            HealthStatus.UNKNOWN, HealthStatus.DEGRADED,
+            HealthStatus.UP,
+            HealthStatus.DOWN,
+            HealthStatus.UNKNOWN,
+            HealthStatus.DEGRADED,
         )
         assert agent.status in valid_statuses
 

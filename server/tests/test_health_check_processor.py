@@ -80,8 +80,13 @@ class TestProcessStatusReport:
                 "name": "Root",
                 "status": "UP",
                 "tasks": [
-                    {"task_id": "t1", "name": "t1", "type": "command",
-                     "status": "UP", "duration_ms": 12.5},
+                    {
+                        "task_id": "t1",
+                        "name": "t1",
+                        "type": "command",
+                        "status": "UP",
+                        "duration_ms": 12.5,
+                    },
                 ],
                 "dependencies": [],
             },
@@ -95,11 +100,7 @@ class TestProcessStatusReport:
         assert task.status == HealthStatus.UP
         assert task.last_duration_ms == 12.5
 
-        result = (
-            db.query(TaskResult)
-            .filter(TaskResult.task_id == task.id)
-            .first()
-        )
+        result = db.query(TaskResult).filter(TaskResult.task_id == task.id).first()
         assert result is not None
         assert result.status == HealthStatus.UP
 
@@ -117,8 +118,7 @@ class TestProcessStatusReport:
                 "name": "Root",
                 "status": "DOWN",
                 "tasks": [
-                    {"task_id": "t1", "name": "t1", "type": "command",
-                     "status": "UP"},
+                    {"task_id": "t1", "name": "t1", "type": "command", "status": "UP"},
                 ],
                 "dependencies": [
                     {
@@ -126,8 +126,13 @@ class TestProcessStatusReport:
                         "name": "DB Layer",
                         "status": "DOWN",
                         "tasks": [
-                            {"task_id": "pg", "name": "pg", "type": "tcp",
-                             "status": "DOWN", "error": "connection refused"},
+                            {
+                                "task_id": "pg",
+                                "name": "pg",
+                                "type": "tcp",
+                                "status": "DOWN",
+                                "error": "connection refused",
+                            },
                         ],
                         "dependencies": [],
                     },
@@ -169,8 +174,7 @@ class TestProcessStatusReport:
                 "system_id": "root-sys",
                 "status": "UP",
                 "tasks": [
-                    {"task_id": "t1", "name": "t1", "type": "command",
-                     "status": "UP"},
+                    {"task_id": "t1", "name": "t1", "type": "command", "status": "UP"},
                 ],
                 "dependencies": [
                     {
@@ -178,8 +182,12 @@ class TestProcessStatusReport:
                         "name": "Child",
                         "status": "DOWN",
                         "tasks": [
-                            {"task_id": "leaf", "name": "leaf", "type": "command",
-                             "status": "DOWN"},
+                            {
+                                "task_id": "leaf",
+                                "name": "leaf",
+                                "type": "command",
+                                "status": "DOWN",
+                            },
                         ],
                     },
                 ],
@@ -205,8 +213,7 @@ class TestProcessStatusReport:
                 "system_id": "root-sys",
                 "status": "UP",
                 "tasks": [
-                    {"task_id": "t1", "name": "t1", "type": "command",
-                     "status": "UP"},
+                    {"task_id": "t1", "name": "t1", "type": "command", "status": "UP"},
                 ],
                 "dependencies": [
                     {
@@ -214,8 +221,7 @@ class TestProcessStatusReport:
                         "name": "Child",
                         "status": "UP",
                         "tasks": [
-                            {"task_id": "leaf", "name": "leaf", "type": "command",
-                             "status": "UP"},
+                            {"task_id": "leaf", "name": "leaf", "type": "command", "status": "UP"},
                         ],
                     },
                 ],
@@ -259,12 +265,10 @@ class TestProcessStatusReport:
             report_data={
                 "system_id": "root-sys",
                 "tasks": [
-                    {"task_id": "t1", "name": "t1", "type": "command",
-                     "status": "UP"},
+                    {"task_id": "t1", "name": "t1", "type": "command", "status": "UP"},
                 ],
                 "dependencies": [
-                    {"system_id": "root-sys", "name": "Self",
-                     "status": "UP", "tasks": []},
+                    {"system_id": "root-sys", "name": "Self", "status": "UP", "tasks": []},
                 ],
             },
             db=db,
@@ -320,12 +324,10 @@ class TestProcessStatusReport:
                 "system_id": "child",
                 "name": "Child",
                 "tasks": [
-                    {"task_id": "c1", "name": "c1", "type": "command",
-                     "status": "UP"},
+                    {"task_id": "c1", "name": "c1", "type": "command", "status": "UP"},
                 ],
                 "dependencies": [
-                    {"system_id": "root-sys", "name": "Root",
-                     "status": "UP", "tasks": []},
+                    {"system_id": "root-sys", "name": "Root", "status": "UP", "tasks": []},
                 ],
             },
             db=db,
@@ -392,8 +394,13 @@ class TestProcessStatusReport:
             report_data={
                 "system_id": "root-sys",
                 "tasks": [
-                    {"task_id": "t1", "name": "t1", "type": "command",
-                     "status": "DOWN", "error": "first failure"},
+                    {
+                        "task_id": "t1",
+                        "name": "t1",
+                        "type": "command",
+                        "status": "DOWN",
+                        "error": "first failure",
+                    },
                 ],
             },
             db=db,
@@ -409,8 +416,7 @@ class TestProcessStatusReport:
             report_data={
                 "system_id": "root-sys",
                 "tasks": [
-                    {"task_id": "t1", "name": "t1", "type": "command",
-                     "status": "UP"},
+                    {"task_id": "t1", "name": "t1", "type": "command", "status": "UP"},
                 ],
             },
             db=db,
@@ -471,15 +477,12 @@ class TestHistory:
             report_data={
                 "system_id": "root-sys",
                 "tasks": [
-                    {"task_id": "t1", "name": "t1", "type": "command",
-                     "status": "UP"},
+                    {"task_id": "t1", "name": "t1", "type": "command", "status": "UP"},
                 ],
             },
             db=db,
         )
 
-        results = HealthCheckProcessor.get_task_history(
-            task_id="t1", system_id="root-sys", db=db
-        )
+        results = HealthCheckProcessor.get_task_history(task_id="t1", system_id="root-sys", db=db)
         assert len(results) == 1
         assert results[0].status == HealthStatus.UP

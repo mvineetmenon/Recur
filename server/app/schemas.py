@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 from .models import HealthStatus
 
-
 # ==================== Agent Schemas ====================
 
 

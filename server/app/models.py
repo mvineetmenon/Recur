@@ -4,20 +4,10 @@ Database models for Recur monitoring platform
 
 from datetime import datetime
 from enum import Enum as PyEnum
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    Column,
-    DateTime,
-    Enum,
-    Float,
-    ForeignKey,
-    Integer,
-    String,
-    Text,
-)
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 # Status enums
 
@@ -29,7 +19,8 @@ class HealthStatus(str, PyEnum):
     DEGRADED = "DEGRADED"
 
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    """Declarative base for all ORM models"""
 
 
 class Agent(Base):
@@ -37,26 +28,26 @@ class Agent(Base):
 
     __tablename__ = "agents"
 
-    id = Column(Integer, primary_key=True)
-    agent_id = Column(String(255), unique=True, nullable=False, index=True)
-    hostname = Column(String(255), nullable=False)
-    ip_address = Column(String(45), nullable=False)
-    version = Column(String(50), default="0.1.0")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    hostname: Mapped[str] = mapped_column(String(255))
+    ip_address: Mapped[str] = mapped_column(String(45))
+    version: Mapped[Optional[str]] = mapped_column(String(50), default="0.1.0")
 
-    last_heartbeat = Column(DateTime, default=datetime.utcnow, nullable=False)
-    registered_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_heartbeat: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    registered_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    status = Column(Enum(HealthStatus), default=HealthStatus.UNKNOWN)
-    is_active = Column(Boolean, default=True)
+    status: Mapped[HealthStatus] = mapped_column(Enum(HealthStatus), default=HealthStatus.UNKNOWN)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Metadata
-    os_type = Column(String(50))
-    cpu_count = Column(Integer)
-    python_version = Column(String(50))
+    os_type: Mapped[Optional[str]] = mapped_column(String(50))
+    cpu_count: Mapped[Optional[int]] = mapped_column(Integer)
+    python_version: Mapped[Optional[str]] = mapped_column(String(50))
 
     # Relationships
-    systems = relationship("System", back_populates="agent")
-    status_reports = relationship("StatusReport", back_populates="agent")
+    systems: Mapped[List["System"]] = relationship(back_populates="agent")
+    status_reports: Mapped[List["StatusReport"]] = relationship(back_populates="agent")
 
     def __repr__(self) -> str:
         return f"<Agent {self.agent_id}>"
@@ -67,35 +58,39 @@ class System(Base):
 
     __tablename__ = "systems"
 
-    id = Column(Integer, primary_key=True)
-    system_id = Column(String(255), unique=True, nullable=False, index=True)
-    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    system_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    agent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("agents.id"))
 
-    name = Column(String(255), nullable=False)
-    description = Column(Text)
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[Optional[str]] = mapped_column(Text)
 
     # Configuration
-    config = Column(JSON, nullable=False)  # Full YAML config as JSON
+    config: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)  # Full YAML config as JSON
 
     # Current status
-    status = Column(Enum(HealthStatus), default=HealthStatus.UNKNOWN)
-    last_check_time = Column(DateTime)
-    last_error = Column(Text)
+    status: Mapped[HealthStatus] = mapped_column(Enum(HealthStatus), default=HealthStatus.UNKNOWN)
+    last_check_time: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationships
-    agent = relationship("Agent", back_populates="systems")
-    tasks = relationship("Task", back_populates="system", cascade="all, delete-orphan")
-    dependencies = relationship(
+    agent: Mapped[Optional["Agent"]] = relationship(back_populates="systems")
+    tasks: Mapped[List["Task"]] = relationship(
+        back_populates="system", cascade="all, delete-orphan"
+    )
+    dependencies: Mapped[List["SystemDependency"]] = relationship(
         "SystemDependency",
         foreign_keys="SystemDependency.parent_system_id",
         back_populates="parent_system",
         cascade="all, delete-orphan",
     )
-    status_history = relationship("StatusReport", back_populates="system")
+    status_history: Mapped[List["StatusReport"]] = relationship(back_populates="system")
 
     def __repr__(self) -> str:
         return f"<System {self.system_id}>"
@@ -106,33 +101,37 @@ class Task(Base):
 
     __tablename__ = "tasks"
 
-    id = Column(Integer, primary_key=True)
-    task_id = Column(String(255), nullable=False, index=True)
-    system_id = Column(Integer, ForeignKey("systems.id"), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(255), index=True)
+    system_id: Mapped[int] = mapped_column(ForeignKey("systems.id"))
 
-    name = Column(String(255), nullable=False)
-    task_type = Column(String(50), nullable=False)  # http, tcp, command, ping, script
+    name: Mapped[str] = mapped_column(String(255))
+    task_type: Mapped[str] = mapped_column(String(50))  # http, tcp, command, ping, script
 
-    # Task configuration
-    config = Column(JSON, nullable=False)  # Type-specific config as JSON
+    # Task configuration (type-specific settings as JSON)
+    config: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
 
     # Current status
-    status = Column(Enum(HealthStatus), default=HealthStatus.UNKNOWN)
-    last_check_time = Column(DateTime)
-    last_duration_ms = Column(Float)  # milliseconds
-    last_error = Column(Text)
+    status: Mapped[HealthStatus] = mapped_column(Enum(HealthStatus), default=HealthStatus.UNKNOWN)
+    last_check_time: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_duration_ms: Mapped[Optional[float]] = mapped_column(Float)  # milliseconds
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
 
     # Timeout and retry settings
-    timeout = Column(Float, default=5.0)  # seconds
-    max_retries = Column(Integer, default=0)
+    timeout: Mapped[float] = mapped_column(Float, default=5.0)  # seconds
+    max_retries: Mapped[int] = mapped_column(Integer, default=0)
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationships
-    system = relationship("System", back_populates="tasks")
-    results = relationship("TaskResult", back_populates="task", cascade="all, delete-orphan")
+    system: Mapped["System"] = relationship(back_populates="tasks")
+    results: Mapped[List["TaskResult"]] = relationship(
+        back_populates="task", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Task {self.task_id}>"
@@ -143,23 +142,25 @@ class SystemDependency(Base):
 
     __tablename__ = "system_dependencies"
 
-    id = Column(Integer, primary_key=True)
-    parent_system_id = Column(Integer, ForeignKey("systems.id"), nullable=False)
-    child_system_id = Column(Integer, ForeignKey("systems.id"), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    parent_system_id: Mapped[int] = mapped_column(ForeignKey("systems.id"))
+    child_system_id: Mapped[int] = mapped_column(ForeignKey("systems.id"))
 
     # Dependency strength/weight for future use
-    criticality = Column(String(50), default="HIGH")  # HIGH, MEDIUM, LOW
+    criticality: Mapped[Optional[str]] = mapped_column(
+        String(50), default="HIGH"
+    )  # HIGH, MEDIUM, LOW
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
-    parent_system = relationship(
+    parent_system: Mapped["System"] = relationship(
         "System",
         foreign_keys=[parent_system_id],
         back_populates="dependencies",
     )
-    child_system = relationship("System", foreign_keys=[child_system_id])
+    child_system: Mapped["System"] = relationship("System", foreign_keys=[child_system_id])
 
     def __repr__(self) -> str:
         return f"<Dependency {self.parent_system_id} -> {self.child_system_id}>"
@@ -170,23 +171,23 @@ class StatusReport(Base):
 
     __tablename__ = "status_reports"
 
-    id = Column(Integer, primary_key=True)
-    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
-    system_id = Column(Integer, ForeignKey("systems.id"), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id"))
+    system_id: Mapped[int] = mapped_column(ForeignKey("systems.id"))
 
-    report_timestamp = Column(DateTime, nullable=False)
-    received_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    report_timestamp: Mapped[datetime] = mapped_column(DateTime)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Full report as JSON for archival
-    report_data = Column(JSON, nullable=False)
+    report_data: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
 
     # Processing metadata
-    processing_duration_ms = Column(Float)
+    processing_duration_ms: Mapped[Optional[float]] = mapped_column(Float)
 
     # Relationships
-    agent = relationship("Agent", back_populates="status_reports")
-    system = relationship("System", back_populates="status_history")
-    task_results = relationship("TaskResult", back_populates="status_report")
+    agent: Mapped["Agent"] = relationship(back_populates="status_reports")
+    system: Mapped["System"] = relationship(back_populates="status_history")
+    task_results: Mapped[List["TaskResult"]] = relationship(back_populates="status_report")
 
     def __repr__(self) -> str:
         return f"<StatusReport {self.id} from {self.agent_id}>"
@@ -197,23 +198,23 @@ class TaskResult(Base):
 
     __tablename__ = "task_results"
 
-    id = Column(Integer, primary_key=True)
-    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
-    status_report_id = Column(Integer, ForeignKey("status_reports.id"), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"))
+    status_report_id: Mapped[int] = mapped_column(ForeignKey("status_reports.id"))
 
-    status = Column(Enum(HealthStatus), nullable=False)
-    duration_ms = Column(Float)
-    error_message = Column(Text)
+    status: Mapped[HealthStatus] = mapped_column(Enum(HealthStatus), nullable=False)
+    duration_ms: Mapped[Optional[float]] = mapped_column(Float)
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
 
     # Additional output
-    output_data = Column(JSON)  # Type-specific output
+    output_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON)  # Type-specific output
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
-    task = relationship("Task", back_populates="results")
-    status_report = relationship("StatusReport", back_populates="task_results")
+    task: Mapped["Task"] = relationship(back_populates="results")
+    status_report: Mapped["StatusReport"] = relationship(back_populates="task_results")
 
     def __repr__(self) -> str:
         return f"<TaskResult {self.id}>"

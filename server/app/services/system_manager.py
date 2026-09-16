@@ -30,10 +30,7 @@ def _delete_system_tasks(db: Session, system_pk: int) -> None:
     with enforced FKs) the TaskResult rows that reference them, so the
     results are removed first.
     """
-    task_ids = [
-        row[0]
-        for row in db.query(Task.id).filter(Task.system_id == system_pk).all()
-    ]
+    task_ids = [row[0] for row in db.query(Task.id).filter(Task.system_id == system_pk).all()]
     if task_ids:
         db.query(TaskResult).filter(TaskResult.task_id.in_(task_ids)).delete(
             synchronize_session=False
@@ -213,7 +210,8 @@ class SystemManager:
 
             # Extract task-specific config
             task_specific_config = {
-                k: v for k, v in task_config.items()
+                k: v
+                for k, v in task_config.items()
                 if k not in ("name", "type", "timeout", "max_retries")
             }
 
@@ -341,12 +339,12 @@ class SystemManager:
         _delete_system_reports(db, system.id)
 
         # Remove dependency links pointing at this system
-        db.query(SystemDependency).filter(
-            SystemDependency.child_system_id == system.id
-        ).delete(synchronize_session=False)
-        db.query(SystemDependency).filter(
-            SystemDependency.parent_system_id == system.id
-        ).delete(synchronize_session=False)
+        db.query(SystemDependency).filter(SystemDependency.child_system_id == system.id).delete(
+            synchronize_session=False
+        )
+        db.query(SystemDependency).filter(SystemDependency.parent_system_id == system.id).delete(
+            synchronize_session=False
+        )
 
         db.expire_all()
         db.delete(system)

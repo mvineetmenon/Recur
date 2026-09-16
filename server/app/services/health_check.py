@@ -100,15 +100,13 @@ class HealthCheckProcessor:
 
         # Evaluate and persist status for every level of the tree,
         # bottom-up, so the parent reflects the full recursive state
-        new_status = HealthCheckProcessor._refresh_statuses(
-            system, report_timestamp, db
-        )
+        new_status = HealthCheckProcessor._refresh_statuses(system, report_timestamp, db)
         system.last_error = report_data.get("error")
 
         # Record processing duration
         status_report.processing_duration_ms = (
-            (datetime.utcnow() - start_time).total_seconds() * 1000
-        )
+            datetime.utcnow() - start_time
+        ).total_seconds() * 1000
 
         db.commit()
         logger.info(f"Processed report for {system_id}: status={new_status}")
@@ -134,11 +132,7 @@ class HealthCheckProcessor:
             # children carry the parent-prefixed id (e.g. `webstack/db`).
             # Resolve the prefixed form so reports match registered children.
             child_id = f"{parent.system_id}/{child_id}"
-            child = (
-                db.query(System)
-                .filter(System.system_id == child_id)
-                .first()
-            )
+            child = db.query(System).filter(System.system_id == child_id).first()
         if child is None:
             child = System(
                 system_id=child_id,
@@ -254,11 +248,7 @@ class HealthCheckProcessor:
             return
 
         # Find task (auto-create when the report references an unregistered task)
-        task = (
-            db.query(Task)
-            .filter(Task.system_id == system.id, Task.task_id == task_id)
-            .first()
-        )
+        task = db.query(Task).filter(Task.system_id == system.id, Task.task_id == task_id).first()
         if not task:
             logger.warning(f"Report contains unknown task: {task_id}")
             task = Task(

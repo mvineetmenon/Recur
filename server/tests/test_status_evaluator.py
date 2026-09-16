@@ -39,31 +39,52 @@ def tree_db(test_db):
     db.flush()
 
     root = System(
-        system_id="root", name="Root", config={"name": "Root", "tasks": []},
-        status=HealthStatus.UNKNOWN, agent_id=agent.id,
+        system_id="root",
+        name="Root",
+        config={"name": "Root", "tasks": []},
+        status=HealthStatus.UNKNOWN,
+        agent_id=agent.id,
     )
     child = System(
-        system_id="child", name="Child", config={"name": "Child", "tasks": []},
-        status=HealthStatus.UNKNOWN, agent_id=agent.id,
+        system_id="child",
+        name="Child",
+        config={"name": "Child", "tasks": []},
+        status=HealthStatus.UNKNOWN,
+        agent_id=agent.id,
     )
     leaf = System(
-        system_id="leaf", name="Leaf", config={"name": "Leaf", "tasks": []},
-        status=HealthStatus.UNKNOWN, agent_id=agent.id,
+        system_id="leaf",
+        name="Leaf",
+        config={"name": "Leaf", "tasks": []},
+        status=HealthStatus.UNKNOWN,
+        agent_id=agent.id,
     )
     db.add_all([root, child, leaf])
     db.flush()
 
     root_task = Task(
-        task_id="root-task", system_id=root.id, name="root-task",
-        task_type="command", config={}, status=HealthStatus.UNKNOWN,
+        task_id="root-task",
+        system_id=root.id,
+        name="root-task",
+        task_type="command",
+        config={},
+        status=HealthStatus.UNKNOWN,
     )
     child_task = Task(
-        task_id="child-task", system_id=child.id, name="child-task",
-        task_type="command", config={}, status=HealthStatus.UNKNOWN,
+        task_id="child-task",
+        system_id=child.id,
+        name="child-task",
+        task_type="command",
+        config={},
+        status=HealthStatus.UNKNOWN,
     )
     leaf_task = Task(
-        task_id="leaf-task", system_id=leaf.id, name="leaf-task",
-        task_type="command", config={}, status=HealthStatus.UNKNOWN,
+        task_id="leaf-task",
+        system_id=leaf.id,
+        name="leaf-task",
+        task_type="command",
+        config={},
+        status=HealthStatus.UNKNOWN,
     )
     db.add_all([root_task, child_task, leaf_task])
     db.flush()
@@ -77,12 +98,16 @@ def tree_db(test_db):
     db.add(report)
     db.flush()
 
-    db.add_all([
-        SystemDependency(parent_system_id=root.id, child_system_id=child.id,
-                         criticality="HIGH"),
-        SystemDependency(parent_system_id=child.id, child_system_id=leaf.id,
-                         criticality="HIGH"),
-    ])
+    db.add_all(
+        [
+            SystemDependency(
+                parent_system_id=root.id, child_system_id=child.id, criticality="HIGH"
+            ),
+            SystemDependency(
+                parent_system_id=child.id, child_system_id=leaf.id, criticality="HIGH"
+            ),
+        ]
+    )
     db.commit()
 
     return {
@@ -105,9 +130,7 @@ def _add_result(ctx, task, status, report=None, created_offset=0):
         task_id=task.id,
         status_report_id=report.id,
         status=status,
-        created_at=datetime.now(timezone.utc).replace(
-            microsecond=created_offset
-        ),
+        created_at=datetime.now(timezone.utc).replace(microsecond=created_offset),
     )
     ctx["db"].add(result)
     ctx["db"].commit()
@@ -120,23 +143,20 @@ class TestEvaluateSystemStatus:
     def test_no_data_is_unknown(self, tree_db):
         ctx = tree_db
         assert (
-            StatusEvaluator.evaluate_system_status(ctx["root"], ctx["db"])
-            is HealthStatus.UNKNOWN
+            StatusEvaluator.evaluate_system_status(ctx["root"], ctx["db"]) is HealthStatus.UNKNOWN
         )
 
     def test_empty_system_is_unknown(self, test_db):
         db = test_db
         system = System(
-            system_id="lonely", name="Lonely",
+            system_id="lonely",
+            name="Lonely",
             config={"name": "Lonely", "tasks": []},
             status=HealthStatus.UNKNOWN,
         )
         db.add(system)
         db.commit()
-        assert (
-            StatusEvaluator.evaluate_system_status(system, db)
-            is HealthStatus.UNKNOWN
-        )
+        assert StatusEvaluator.evaluate_system_status(system, db) is HealthStatus.UNKNOWN
 
     def test_all_up_is_up(self, tree_db):
         ctx = tree_db
@@ -144,12 +164,8 @@ class TestEvaluateSystemStatus:
             _add_result(ctx, task, HealthStatus.UP, created_offset=i)
         db = ctx["db"]
         db.expire_all()
-        assert (
-            StatusEvaluator.evaluate_system_status(ctx["root"], db) is HealthStatus.UP
-        )
-        assert (
-            StatusEvaluator.evaluate_system_status(ctx["child"], db) is HealthStatus.UP
-        )
+        assert StatusEvaluator.evaluate_system_status(ctx["root"], db) is HealthStatus.UP
+        assert StatusEvaluator.evaluate_system_status(ctx["child"], db) is HealthStatus.UP
 
     def test_down_leaf_propagates_to_root(self, tree_db):
         """A DOWN two levels deep makes the root DOWN"""
@@ -160,15 +176,9 @@ class TestEvaluateSystemStatus:
         db = ctx["db"]
         db.expire_all()
 
-        assert (
-            StatusEvaluator.evaluate_system_status(ctx["leaf"], db) is HealthStatus.DOWN
-        )
-        assert (
-            StatusEvaluator.evaluate_system_status(ctx["child"], db) is HealthStatus.DOWN
-        )
-        assert (
-            StatusEvaluator.evaluate_system_status(ctx["root"], db) is HealthStatus.DOWN
-        )
+        assert StatusEvaluator.evaluate_system_status(ctx["leaf"], db) is HealthStatus.DOWN
+        assert StatusEvaluator.evaluate_system_status(ctx["child"], db) is HealthStatus.DOWN
+        assert StatusEvaluator.evaluate_system_status(ctx["root"], db) is HealthStatus.DOWN
 
     def test_unknown_child_keeps_root_unknown(self, tree_db):
         """UP tasks plus a child with no data => UNKNOWN (not UP, not DOWN)"""
@@ -178,9 +188,7 @@ class TestEvaluateSystemStatus:
         # leaf_task has no result
         db = ctx["db"]
         db.expire_all()
-        assert (
-            StatusEvaluator.evaluate_system_status(ctx["root"], db) is HealthStatus.UNKNOWN
-        )
+        assert StatusEvaluator.evaluate_system_status(ctx["root"], db) is HealthStatus.UNKNOWN
 
     def test_uses_latest_result(self, tree_db):
         ctx = tree_db
@@ -190,9 +198,7 @@ class TestEvaluateSystemStatus:
         _add_result(ctx, ctx["root_task"], HealthStatus.UP, created_offset=3)
         db = ctx["db"]
         db.expire_all()
-        assert (
-            StatusEvaluator.evaluate_system_status(ctx["root"], db) is HealthStatus.UP
-        )
+        assert StatusEvaluator.evaluate_system_status(ctx["root"], db) is HealthStatus.UP
 
 
 class TestGetSystemTree:
@@ -240,31 +246,32 @@ class TestCycleGuard:
 
     def _make_cycle(self, db):
         a = System(
-            system_id="cy-a", name="A", config={"name": "A", "tasks": []},
+            system_id="cy-a",
+            name="A",
+            config={"name": "A", "tasks": []},
             status=HealthStatus.UNKNOWN,
         )
         b = System(
-            system_id="cy-b", name="B", config={"name": "B", "tasks": []},
+            system_id="cy-b",
+            name="B",
+            config={"name": "B", "tasks": []},
             status=HealthStatus.UNKNOWN,
         )
         db.add_all([a, b])
         db.flush()
-        db.add_all([
-            SystemDependency(parent_system_id=a.id, child_system_id=b.id,
-                             criticality="HIGH"),
-            SystemDependency(parent_system_id=b.id, child_system_id=a.id,
-                             criticality="HIGH"),
-        ])
+        db.add_all(
+            [
+                SystemDependency(parent_system_id=a.id, child_system_id=b.id, criticality="HIGH"),
+                SystemDependency(parent_system_id=b.id, child_system_id=a.id, criticality="HIGH"),
+            ]
+        )
         db.commit()
         return a
 
     def test_cycle_evaluation_returns_unknown(self, test_db):
         a = self._make_cycle(test_db)
         # Must terminate (no RecursionError) and not report UP/DOWN
-        assert (
-            StatusEvaluator.evaluate_system_status(a, test_db)
-            is HealthStatus.UNKNOWN
-        )
+        assert StatusEvaluator.evaluate_system_status(a, test_db) is HealthStatus.UNKNOWN
 
     def test_cycle_tree_terminates(self, test_db):
         a = self._make_cycle(test_db)
@@ -284,41 +291,47 @@ class TestCycleGuard:
     def test_diamond_dependency_evaluated_on_every_path(self, test_db):
         """A shared child (diamond) is not mistaken for a cycle"""
         top = System(
-            system_id="dia-top", name="Top", config={"name": "T", "tasks": []},
+            system_id="dia-top",
+            name="Top",
+            config={"name": "T", "tasks": []},
             status=HealthStatus.UNKNOWN,
         )
         left = System(
-            system_id="dia-left", name="Left", config={"name": "L", "tasks": []},
+            system_id="dia-left",
+            name="Left",
+            config={"name": "L", "tasks": []},
             status=HealthStatus.UNKNOWN,
         )
         right = System(
-            system_id="dia-right", name="Right", config={"name": "R", "tasks": []},
+            system_id="dia-right",
+            name="Right",
+            config={"name": "R", "tasks": []},
             status=HealthStatus.UNKNOWN,
         )
         shared = System(
-            system_id="dia-shared", name="Shared", config={"name": "S", "tasks": []},
+            system_id="dia-shared",
+            name="Shared",
+            config={"name": "S", "tasks": []},
             status=HealthStatus.UNKNOWN,
         )
         test_db.add_all([top, left, right, shared])
         test_db.flush()
-        test_db.add_all([
-            SystemDependency(parent_system_id=top.id, child_system_id=left.id),
-            SystemDependency(parent_system_id=top.id, child_system_id=right.id),
-            SystemDependency(parent_system_id=left.id, child_system_id=shared.id),
-            SystemDependency(parent_system_id=right.id, child_system_id=shared.id),
-        ])
+        test_db.add_all(
+            [
+                SystemDependency(parent_system_id=top.id, child_system_id=left.id),
+                SystemDependency(parent_system_id=top.id, child_system_id=right.id),
+                SystemDependency(parent_system_id=left.id, child_system_id=shared.id),
+                SystemDependency(parent_system_id=right.id, child_system_id=shared.id),
+            ]
+        )
         test_db.commit()
 
         tree = StatusEvaluator.get_system_tree(top, test_db)
         # Shared child appears fully rendered under both parents
         assert tree["dependencies"][0]["system_id"] == "dia-left"
         assert tree["dependencies"][1]["system_id"] == "dia-right"
-        assert (
-            tree["dependencies"][0]["dependencies"][0]["system_id"] == "dia-shared"
-        )
-        assert (
-            tree["dependencies"][1]["dependencies"][0]["system_id"] == "dia-shared"
-        )
+        assert tree["dependencies"][0]["dependencies"][0]["system_id"] == "dia-shared"
+        assert tree["dependencies"][1]["dependencies"][0]["system_id"] == "dia-shared"
 
 
 class TestHealthSummary:

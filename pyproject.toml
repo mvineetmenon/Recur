@@ -60,7 +60,7 @@ Issues = "https://github.com/mvineetmenon/Recur/issues"
 
 [tool.black]
 line-length = 100
-target-version = ['py311']
+target-version = ['py312']
 
 [tool.isort]
 profile = "black"
