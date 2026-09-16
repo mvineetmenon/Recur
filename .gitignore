@@ -67,4 +67,3 @@ kilo.json
 # LAN-specific build files (never commit to the public repo)
 Dockerfile.server.lan
 docker-compose.lan.yml
-ubuntu.sources

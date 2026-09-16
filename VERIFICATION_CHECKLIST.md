@@ -132,6 +132,7 @@ Use this checklist to verify your Recur installation and setup.
 
 - [ ] Database connection works
 - [ ] All tables created
+- [ ] JSON columns are JSONB: `\d systems` in psql shows `jsonb`
 - [ ] Foreign key constraints working
 - [ ] Indexes created properly
 
@@ -244,8 +245,7 @@ If any check fails, refer to the troubleshooting section in:
 ## ✨ Optional Enhancements to Try
 
 - [ ] Setup HTTPS/TLS
-- [ ] Configure PostgreSQL backend
-- [ ] Setup Docker Compose production profile
+- [ ] Setup Docker Compose Redis profile (`--profile production`)
 - [ ] Add authentication (JWT)
 - [ ] Setup log aggregation
 - [ ] Configure monitoring alerts

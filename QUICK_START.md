@@ -33,6 +33,9 @@ Either way:
 - Dashboard: `http://localhost:8000/dashboard`
 - Health: `http://localhost:8000/api/v1/health`
 
+Option A uses SQLite (`./recur.db`); Option B runs PostgreSQL alongside the
+server (JSON columns stored as JSONB).
+
 ## 2. Install an Agent
 
 On each machine you want to monitor:

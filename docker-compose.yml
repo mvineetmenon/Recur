@@ -1,7 +1,5 @@
-version: '3.8'
-
 services:
-  # Central Server (default profile: server-only, SQLite)
+  # Central Server (default profile: server + PostgreSQL)
   server:
     build:
       context: .
@@ -9,12 +7,13 @@ services:
     ports:
       - "${RECUR_HTTP_PORT:-8000}:8000"
     environment:
-      - DATABASE_URL=sqlite:////app/data/recur.db
+      - DATABASE_URL=postgresql+psycopg2://recur:${DB_PASSWORD:-recur-dev-password}@postgres:5432/recur
       - DEBUG=false
       - LOG_LEVEL=INFO
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
-    volumes:
-      - recur_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     command: python3 -m server.app.main
     networks:
       - recur-network
@@ -24,21 +23,25 @@ services:
       timeout: 5s
       retries: 3
 
-  # PostgreSQL (Optional, for production)
+  # PostgreSQL (default database; JSON columns map to JSONB)
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: recur
       POSTGRES_USER: recur
-      POSTGRES_PASSWORD: recur-dev-password
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-recur-dev-password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "${PG_HOST_PORT:-5432}:5432"
     networks:
       - recur-network
-    profiles:
-      - production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recur -d recur"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # Redis (Optional, for caching)
   redis:
@@ -55,5 +58,4 @@ networks:
     driver: bridge
 
 volumes:
-  recur_data:
   postgres_data:

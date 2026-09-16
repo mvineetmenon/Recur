@@ -7,7 +7,11 @@ from enum import Enum as PyEnum
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+# JSONB on PostgreSQL, plain JSON elsewhere (e.g. SQLite)
+JSON_TYPE = JSON().with_variant(JSONB(), "postgresql")
 
 # Status enums
 
@@ -65,8 +69,8 @@ class System(Base):
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[Optional[str]] = mapped_column(Text)
 
-    # Configuration
-    config: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)  # Full YAML config as JSON
+    # Configuration (full YAML config as JSON)
+    config: Mapped[Dict[str, Any]] = mapped_column(JSON_TYPE, nullable=False)
 
     # Current status
     status: Mapped[HealthStatus] = mapped_column(Enum(HealthStatus), default=HealthStatus.UNKNOWN)
@@ -109,7 +113,7 @@ class Task(Base):
     task_type: Mapped[str] = mapped_column(String(50))  # http, tcp, command, ping, script
 
     # Task configuration (type-specific settings as JSON)
-    config: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
+    config: Mapped[Dict[str, Any]] = mapped_column(JSON_TYPE, nullable=False)
 
     # Current status
     status: Mapped[HealthStatus] = mapped_column(Enum(HealthStatus), default=HealthStatus.UNKNOWN)
@@ -179,7 +183,7 @@ class StatusReport(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Full report as JSON for archival
-    report_data: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
+    report_data: Mapped[Dict[str, Any]] = mapped_column(JSON_TYPE, nullable=False)
 
     # Processing metadata
     processing_duration_ms: Mapped[Optional[float]] = mapped_column(Float)
@@ -207,7 +211,7 @@ class TaskResult(Base):
     error_message: Mapped[Optional[str]] = mapped_column(Text)
 
     # Additional output
-    output_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON)  # Type-specific output
+    output_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE)  # Type-specific output
 
     # Metadata
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -53,6 +53,9 @@ source venv/bin/activate
 python -m server.app.main
 ```
 
+Uses SQLite by default (`./recur.db`). To use PostgreSQL instead, set
+`DATABASE_URL` (e.g. `postgresql+psycopg2://user:pass@host:5432/recur`).
+
 - Server: `http://localhost:8000`
 - Dashboard: `http://localhost:8000/dashboard`
 - Health: `http://localhost:8000/api/v1/health`
@@ -71,9 +74,11 @@ docker compose up -d --build
 
 Notes:
 
-- The default profile runs the server only (SQLite, data in a named volume).
-- `docker compose --profile production up -d` additionally starts PostgreSQL and Redis.
+- The default setup runs the server plus PostgreSQL (JSON columns are stored as JSONB).
+- `docker compose --profile production up -d` additionally starts Redis.
 - Host port is configurable: `RECUR_HTTP_PORT=9000 docker compose up -d`
+- Database password is configurable: `DB_PASSWORD=secret docker compose up -d`
+- Host port for PostgreSQL is configurable: `PG_HOST_PORT=15432 docker compose up -d`
 - CORS is configurable (comma-separated origins, defaults to `*`): `CORS_ORIGINS="https://dash.example.com" docker compose up -d`
 
 ### Agent (both options)
@@ -296,7 +301,7 @@ make format        # black + isort
 
 ### Production Checklist
 
-- [ ] Configure `DATABASE_URL` with production database (PostgreSQL recommended)
+- [ ] Set a strong `DB_PASSWORD` (or point `DATABASE_URL` at your own PostgreSQL)
 - [ ] Set `DEBUG=false`
 - [ ] Restrict CORS via `CORS_ORIGINS`
 - [ ] Configure TLS/HTTPS certificates (reverse proxy)
