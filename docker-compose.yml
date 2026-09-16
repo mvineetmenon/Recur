@@ -1,25 +1,25 @@
 version: '3.8'
 
 services:
-  # Central Server
+  # Central Server (default profile: server-only, SQLite)
   server:
     build:
       context: .
       dockerfile: Dockerfile.server
     ports:
-      - "8000:8000"
+      - "${RECUR_HTTP_PORT:-8000}:8000"
     environment:
-      - DATABASE_URL=sqlite:///./recur.db
-      - DEBUG=true
-      - LOG_LEVEL=DEBUG
+      - DATABASE_URL=sqlite:////app/data/recur.db
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
     volumes:
-      - ./server:/app/server
-      - ./configs:/app/configs:ro
-    command: python server/app/main.py
+      - recur_data:/app/data
+    command: python3 -m server.app.main
     networks:
       - recur-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -55,4 +55,5 @@ networks:
     driver: bridge
 
 volumes:
+  recur_data:
   postgres_data:

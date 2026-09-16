@@ -2,13 +2,13 @@
 Recur Server - Main FastAPI Application
 """
 
-import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from . import config
 from .database import init_db
@@ -43,11 +43,15 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Web UI templates
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 # Exception handlers
@@ -89,208 +93,19 @@ async def root():
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard():
+async def dashboard(request: Request):
     """Main dashboard page"""
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Recur - System Health Monitoring Dashboard</title>
-        <style>
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
-            
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-                padding: 20px;
-            }
-            
-            .container {
-                max-width: 1200px;
-                margin: 0 auto;
-            }
-            
-            header {
-                background: white;
-                padding: 30px;
-                border-radius: 10px;
-                margin-bottom: 30px;
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-            }
-            
-            h1 {
-                color: #333;
-                margin-bottom: 10px;
-            }
-            
-            .subtitle {
-                color: #666;
-                font-size: 14px;
-            }
-            
-            .systems-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-                gap: 20px;
-            }
-            
-            .system-card {
-                background: white;
-                border-radius: 10px;
-                padding: 20px;
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-                transition: transform 0.2s;
-            }
-            
-            .system-card:hover {
-                transform: translateY(-5px);
-            }
-            
-            .system-name {
-                font-size: 18px;
-                font-weight: 600;
-                margin-bottom: 10px;
-            }
-            
-            .status-badge {
-                display: inline-block;
-                padding: 6px 12px;
-                border-radius: 20px;
-                font-size: 12px;
-                font-weight: 600;
-                margin-bottom: 10px;
-            }
-            
-            .status-up {
-                background: #10b981;
-                color: white;
-            }
-            
-            .status-down {
-                background: #ef4444;
-                color: white;
-            }
-            
-            .status-unknown {
-                background: #9ca3af;
-                color: white;
-            }
-            
-            .loading {
-                color: #666;
-                font-size: 14px;
-                padding: 40px;
-                text-align: center;
-            }
-            
-            .error {
-                background: #fef2f2;
-                color: #dc2626;
-                padding: 15px;
-                border-radius: 5px;
-                margin-top: 20px;
-                border-left: 4px solid #dc2626;
-            }
-            
-            .api-info {
-                background: #f0f9ff;
-                color: #0369a1;
-                padding: 15px;
-                border-radius: 5px;
-                margin-top: 20px;
-                border-left: 4px solid #0369a1;
-                font-size: 14px;
-            }
-            
-            code {
-                background: #f3f4f6;
-                padding: 2px 6px;
-                border-radius: 3px;
-                font-family: 'Courier New', monospace;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <header>
-                <h1>🔍 Recur - System Health Monitoring</h1>
-                <p class="subtitle">Recursive dependency checking for complex systems</p>
-            </header>
-            
-            <div class="api-info">
-                <strong>📡 API Available:</strong><br>
-                <code>GET /api/v1/systems</code> - List all systems<br>
-                <code>POST /api/v1/status</code> - Submit status report<br>
-                <code>GET /api/v1/agents</code> - List agents
-            </div>
-            
-            <div class="systems-grid" id="systems-container">
-                <div class="loading">Loading systems...</div>
-            </div>
-        </div>
-        
-        <script>
-            async function loadSystems() {
-                try {
-                    const response = await fetch('/api/v1/systems?limit=100');
-                    const data = await response.json();
-                    
-                    const container = document.getElementById('systems-container');
-                    
-                    if (data.systems.length === 0) {
-                        container.innerHTML = '<div class="loading">No systems registered yet.<br>Use the API to register systems.</div>';
-                        return;
-                    }
-                    
-                    container.innerHTML = data.systems.map(system => `
-                        <div class="system-card">
-                            <div class="system-name">${system.name}</div>
-                            <div>
-                                <span class="status-badge status-${system.status.toLowerCase()}">
-                                    ${system.status === 'UP' ? '✓' : '✗'} ${system.status}
-                                </span>
-                            </div>
-                            ${system.description ? `<p style="color: #666; font-size: 14px; margin-top: 10px;">${system.description}</p>` : ''}
-                            <p style="color: #999; font-size: 12px; margin-top: 10px;">
-                                Last check: ${system.last_check_time ? new Date(system.last_check_time).toLocaleString() : 'Never'}
-                            </p>
-                        </div>
-                    `).join('');
-                } catch (error) {
-                    document.getElementById('systems-container').innerHTML = `
-                        <div class="error">
-                            <strong>Error loading systems:</strong><br>${error.message}
-                        </div>
-                    `;
-                }
-            }
-            
-            // Load systems on page load
-            loadSystems();
-            
-            // Refresh every 10 seconds
-            setInterval(loadSystems, 10000);
-        </script>
-    </body>
-    </html>
-    """
+    return templates.TemplateResponse("dashboard.html", {"request": request})
 
 
 def main():
     """Run the server"""
     import uvicorn
-    
+
     logger.info(f"Starting Recur server on {config.HOST}:{config.PORT}")
     logger.info(f"Database: {config.DATABASE_URL}")
     logger.info(f"Debug mode: {config.DEBUG}")
-    
+
     uvicorn.run(
         "server.app.main:app",
         host=config.HOST,

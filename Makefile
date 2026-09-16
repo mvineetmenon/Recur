@@ -11,6 +11,7 @@ help:
 	@echo "  make format       - Format code"
 	@echo "  make run          - Run development server"
 	@echo "  make run-docker   - Run with Docker Compose"
+	@echo "  make install-agent - Show agent install command"
 	@echo "  make clean        - Clean up build artifacts"
 
 install:
@@ -31,10 +32,10 @@ format:
 	@. venv/bin/activate && black server/ && isort server/
 
 run:
-	@. venv/bin/activate && python server/app/main.py
+	@. venv/bin/activate && python -m server.app.main
 
 run-docker:
-	@docker-compose up -d
+	@docker compose up -d
 	@echo "Server running at http://localhost:8000"
 	@echo "Dashboard at http://localhost:8000/dashboard"
 

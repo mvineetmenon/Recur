@@ -12,7 +12,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_DIR = BASE_DIR / "logs"
-LOG_DIR.mkdir(exist_ok=True)
 
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./recur.db")
@@ -27,18 +26,8 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 
-# Timeouts and intervals
-DEFAULT_CHECK_TIMEOUT = 5
-MAX_CHECK_TIMEOUT = 30
-MIN_CHECK_INTERVAL = 10
-MAX_CHECK_INTERVAL = 3600
-
-# Agent
-AGENT_HEARTBEAT_TIMEOUT = 300  # 5 minutes
-AGENT_REGISTRATION_TTL = 3600  # 1 hour
-
-# Status retention
-STATUS_RETENTION_DAYS = 30
+# CORS: comma-separated origins; "*" allows all (dev default)
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
 
 # Pagination
 DEFAULT_PAGE_SIZE = 20

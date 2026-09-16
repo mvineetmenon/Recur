@@ -4,7 +4,6 @@ Database models for Recur monitoring platform
 
 from datetime import datetime
 from enum import Enum as PyEnum
-from typing import Optional
 
 from sqlalchemy import (
     JSON,
@@ -17,14 +16,12 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    create_engine,
 )
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
-
-from . import config
+from sqlalchemy.orm import declarative_base, relationship
 
 # Status enums
+
+
 class HealthStatus(str, PyEnum):
     UP = "UP"
     DOWN = "DOWN"
@@ -45,18 +42,18 @@ class Agent(Base):
     hostname = Column(String(255), nullable=False)
     ip_address = Column(String(45), nullable=False)
     version = Column(String(50), default="0.1.0")
-    
+
     last_heartbeat = Column(DateTime, default=datetime.utcnow, nullable=False)
     registered_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    
+
     status = Column(Enum(HealthStatus), default=HealthStatus.UNKNOWN)
     is_active = Column(Boolean, default=True)
-    
+
     # Metadata
     os_type = Column(String(50))
     cpu_count = Column(Integer)
     python_version = Column(String(50))
-    
+
     # Relationships
     systems = relationship("System", back_populates="agent")
     status_reports = relationship("StatusReport", back_populates="agent")
@@ -73,22 +70,22 @@ class System(Base):
     id = Column(Integer, primary_key=True)
     system_id = Column(String(255), unique=True, nullable=False, index=True)
     agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
-    
+
     name = Column(String(255), nullable=False)
     description = Column(Text)
-    
+
     # Configuration
     config = Column(JSON, nullable=False)  # Full YAML config as JSON
-    
+
     # Current status
     status = Column(Enum(HealthStatus), default=HealthStatus.UNKNOWN)
     last_check_time = Column(DateTime)
     last_error = Column(Text)
-    
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     agent = relationship("Agent", back_populates="systems")
     tasks = relationship("Task", back_populates="system", cascade="all, delete-orphan")
@@ -112,27 +109,27 @@ class Task(Base):
     id = Column(Integer, primary_key=True)
     task_id = Column(String(255), nullable=False, index=True)
     system_id = Column(Integer, ForeignKey("systems.id"), nullable=False)
-    
+
     name = Column(String(255), nullable=False)
     task_type = Column(String(50), nullable=False)  # http, tcp, command, ping, script
-    
+
     # Task configuration
     config = Column(JSON, nullable=False)  # Type-specific config as JSON
-    
+
     # Current status
     status = Column(Enum(HealthStatus), default=HealthStatus.UNKNOWN)
     last_check_time = Column(DateTime)
     last_duration_ms = Column(Float)  # milliseconds
     last_error = Column(Text)
-    
+
     # Timeout and retry settings
     timeout = Column(Float, default=5.0)  # seconds
     max_retries = Column(Integer, default=0)
-    
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     system = relationship("System", back_populates="tasks")
     results = relationship("TaskResult", back_populates="task", cascade="all, delete-orphan")
@@ -149,13 +146,13 @@ class SystemDependency(Base):
     id = Column(Integer, primary_key=True)
     parent_system_id = Column(Integer, ForeignKey("systems.id"), nullable=False)
     child_system_id = Column(Integer, ForeignKey("systems.id"), nullable=False)
-    
+
     # Dependency strength/weight for future use
     criticality = Column(String(50), default="HIGH")  # HIGH, MEDIUM, LOW
-    
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    
+
     # Relationships
     parent_system = relationship(
         "System",
@@ -176,16 +173,16 @@ class StatusReport(Base):
     id = Column(Integer, primary_key=True)
     agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
     system_id = Column(Integer, ForeignKey("systems.id"), nullable=False)
-    
+
     report_timestamp = Column(DateTime, nullable=False)
     received_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    
+
     # Full report as JSON for archival
     report_data = Column(JSON, nullable=False)
-    
+
     # Processing metadata
     processing_duration_ms = Column(Float)
-    
+
     # Relationships
     agent = relationship("Agent", back_populates="status_reports")
     system = relationship("System", back_populates="status_history")
@@ -203,44 +200,20 @@ class TaskResult(Base):
     id = Column(Integer, primary_key=True)
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
     status_report_id = Column(Integer, ForeignKey("status_reports.id"), nullable=False)
-    
+
     status = Column(Enum(HealthStatus), nullable=False)
     duration_ms = Column(Float)
     error_message = Column(Text)
-    
+
     # Additional output
     output_data = Column(JSON)  # Type-specific output
-    
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    
+
     # Relationships
     task = relationship("Task", back_populates="results")
     status_report = relationship("StatusReport", back_populates="task_results")
 
     def __repr__(self) -> str:
         return f"<TaskResult {self.id}>"
-
-
-# Database initialization
-engine = create_engine(
-    config.DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in config.DATABASE_URL else {},
-    echo=config.DEBUG,
-)
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def init_db():
-    """Initialize database tables"""
-    Base.metadata.create_all(bind=engine)
-
-
-def get_db():
-    """Dependency for getting database session"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()

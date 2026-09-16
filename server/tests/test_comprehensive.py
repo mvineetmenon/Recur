@@ -7,55 +7,19 @@ import json
 from datetime import datetime, timezone
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
 
-from server.app.database import Base
-from server.app.main import app
-from server.app.models import Agent, HealthStatus, System, Task
-from server.app.services.health_check import HealthCheckProcessor
+from server.app.models import Agent, HealthStatus, StatusReport, System, Task, TaskResult
 from server.app.services.status_evaluator import StatusEvaluator
-from server.app.services.system_manager import SystemManager
 from server.app.utils.yaml_loader import (
+    YAMLConfigError,
     config_to_json_serializable,
     flatten_config,
     validate_system_config,
     validate_task_type_config,
 )
 
-
-# ==================== Database Setup ====================
-
-
-TEST_DATABASE_URL = "sqlite:///:memory:"
-
-
-@pytest.fixture(scope="session")
-def test_engine():
-    """Create test database engine"""
-    engine = create_engine(TEST_DATABASE_URL, echo=False)
-    Base.metadata.create_all(bind=engine)
-    yield engine
-    Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture
-def test_db(test_engine):
-    """Database session fixture"""
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
-    session = TestingSessionLocal()
-    yield session
-    session.close()
-
-
-# ==================== Router Tests ====================
-
-
-@pytest.fixture
-def client():
-    """FastAPI test client"""
-    return TestClient(app)
+# Note: the `client`, `test_db`, and `test_engine` fixtures come from
+# conftest.py (shared in-memory engine, per-test savepoint isolation).
 
 
 class TestAgentRouters:
@@ -151,8 +115,8 @@ class TestSystemRouters:
 
     @pytest.fixture(autouse=True)
     def setup_agent(self, client):
-        """Register an agent for system tests"""
-        client.post(
+        """Register an agent for system tests and expose its database id"""
+        response = client.post(
             "/api/v1/agents/register",
             json={
                 "agent_id": "sys-test-agent",
@@ -160,6 +124,7 @@ class TestSystemRouters:
                 "ip_address": "192.168.1.100",
             },
         )
+        self.agent_db_id = response.json()["id"]
 
     def test_create_system_success(self, client):
         """Test successful system creation"""
@@ -168,7 +133,7 @@ class TestSystemRouters:
             json={
                 "system_id": "create-test-1",
                 "name": "Test System",
-                "agent_id": "sys-test-agent",
+                "agent_id": self.agent_db_id,
                 "config": {
                     "name": "Test",
                     "tasks": [],
@@ -186,7 +151,7 @@ class TestSystemRouters:
             json={
                 "system_id": "bad-config",
                 "name": "Bad",
-                "agent_id": "sys-test-agent",
+                "agent_id": self.agent_db_id,
                 "config": {"tasks": []},  # Missing 'name'
             },
         )
@@ -230,7 +195,11 @@ class TestAgentModel:
 
     def test_agent_status_enum(self, test_db):
         """Test agent status enum values"""
-        for status in [HealthStatus.UP, HealthStatus.DOWN, HealthStatus.UNKNOWN, HealthStatus.DEGRADED]:
+        all_statuses = [
+            HealthStatus.UP, HealthStatus.DOWN,
+            HealthStatus.UNKNOWN, HealthStatus.DEGRADED,
+        ]
+        for status in all_statuses:
             agent = Agent(
                 agent_id=f"model-test-{status.value}",
                 hostname="test.local",
@@ -238,7 +207,7 @@ class TestAgentModel:
                 status=status,
             )
             test_db.add(agent)
-        
+
         test_db.commit()
         agents = test_db.query(Agent).all()
         assert len(agents) >= 4
@@ -293,6 +262,7 @@ class TestSystemModel:
         task = Task(
             task_id="task-rel-test",
             system_id=system.id,
+            name="rel-task",
             task_type="http",
             config={"url": "http://localhost"},
         )
@@ -328,6 +298,7 @@ class TestTaskModel:
         task = Task(
             task_id="task-model-test",
             system_id=system.id,
+            name="model-task",
             task_type="http",
             config={"url": "http://localhost", "expected_status": 200},
             status=HealthStatus.UP,
@@ -363,17 +334,41 @@ class TestTaskModel:
             task = Task(
                 task_id=f"task-{task_type}",
                 system_id=system.id,
+                name=f"task-{task_type}",
                 task_type=task_type,
                 config={},
             )
             test_db.add(task)
-        
+
         test_db.commit()
         tasks = test_db.query(Task).filter(Task.system_id == system.id).all()
         assert len(tasks) == 5
 
 
 # ==================== Service Tests ====================
+
+
+def _add_task_result(test_db, task, status, agent_pk, error=None):
+    """Attach a TaskResult row (anchored to a StatusReport) to a task"""
+    report = StatusReport(
+        agent_id=agent_pk,
+        system_id=task.system_id,
+        report_timestamp=datetime.utcnow(),
+        report_data={},
+    )
+    test_db.add(report)
+    test_db.flush()
+
+    result = TaskResult(
+        task_id=task.id,
+        status_report_id=report.id,
+        status=status,
+        duration_ms=5.0,
+        error_message=error,
+    )
+    test_db.add(result)
+    test_db.commit()
+    return result
 
 
 class TestStatusEvaluatorService:
@@ -400,7 +395,7 @@ class TestStatusEvaluatorService:
 
         evaluator = StatusEvaluator()
         status = evaluator.evaluate_system_status(system, test_db)
-        assert status == HealthStatus.UP
+        assert status == HealthStatus.UNKNOWN
 
     def test_evaluate_system_with_up_task(self, test_db):
         """Test evaluation with UP task"""
@@ -424,12 +419,15 @@ class TestStatusEvaluatorService:
         task = Task(
             task_id="eval-up-task",
             system_id=system.id,
+            name="eval-up-task",
             task_type="http",
             config={},
-            status=HealthStatus.UP,
         )
         test_db.add(task)
         test_db.commit()
+        test_db.refresh(task)
+
+        _add_task_result(test_db, task, HealthStatus.UP, agent.id)
 
         evaluator = StatusEvaluator()
         status = evaluator.evaluate_system_status(system, test_db)
@@ -457,12 +455,15 @@ class TestStatusEvaluatorService:
         task = Task(
             task_id="eval-down-task",
             system_id=system.id,
+            name="eval-down-task",
             task_type="http",
             config={},
-            status=HealthStatus.DOWN,
         )
         test_db.add(task)
         test_db.commit()
+        test_db.refresh(task)
+
+        _add_task_result(test_db, task, HealthStatus.DOWN, agent.id, error="boom")
 
         evaluator = StatusEvaluator()
         status = evaluator.evaluate_system_status(system, test_db)
@@ -491,9 +492,9 @@ class TestStatusEvaluatorService:
         task1 = Task(
             task_id="eval-mixed-up",
             system_id=system.id,
+            name="eval-mixed-up",
             task_type="http",
             config={},
-            status=HealthStatus.UP,
         )
         test_db.add(task1)
 
@@ -501,12 +502,17 @@ class TestStatusEvaluatorService:
         task2 = Task(
             task_id="eval-mixed-down",
             system_id=system.id,
+            name="eval-mixed-down",
             task_type="tcp",
             config={},
-            status=HealthStatus.DOWN,
         )
         test_db.add(task2)
         test_db.commit()
+        test_db.refresh(task1)
+        test_db.refresh(task2)
+
+        _add_task_result(test_db, task1, HealthStatus.UP, agent.id)
+        _add_task_result(test_db, task2, HealthStatus.DOWN, agent.id, error="boom")
 
         evaluator = StatusEvaluator()
         status = evaluator.evaluate_system_status(system, test_db)
@@ -533,7 +539,7 @@ class TestStatusEvaluatorService:
 
         evaluator = StatusEvaluator()
         tree = evaluator.get_system_tree(system, test_db)
-        
+
         assert tree is not None
         assert tree["system_id"] == "tree-sys"
         assert "tasks" in tree
@@ -547,20 +553,23 @@ class TestYAMLValidation:
     """Tests for YAML validation utilities"""
 
     def test_validate_valid_config(self):
-        """Test validating valid system config"""
+        """Test validating valid system config (wrapped in 'system' root key)"""
         config = {
-            "name": "Test",
-            "tasks": [],
+            "system": {
+                "name": "Test",
+                "tasks": [],
+            }
         }
-        result = validate_system_config(config)
-        assert result is True
+        validate_system_config(config)  # Should not raise
 
     def test_validate_missing_name(self):
         """Test validation fails for missing name"""
         config = {
-            "tasks": [],
+            "system": {
+                "tasks": [],
+            }
         }
-        with pytest.raises(ValueError):
+        with pytest.raises(YAMLConfigError):
             validate_system_config(config)
 
     def test_validate_http_task(self):
@@ -570,8 +579,7 @@ class TestYAMLValidation:
             "url": "http://localhost",
             "expected_status": 200,
         }
-        result = validate_task_type_config(task)
-        assert result is True
+        validate_task_type_config(task)  # Should not raise
 
     def test_validate_tcp_task(self):
         """Test TCP task validation"""
@@ -580,32 +588,35 @@ class TestYAMLValidation:
             "host": "localhost",
             "port": 5432,
         }
-        result = validate_task_type_config(task)
-        assert result is True
+        validate_task_type_config(task)  # Should not raise
 
     def test_validate_http_missing_url(self):
         """Test HTTP validation fails without URL"""
         task = {
             "type": "http",
         }
-        with pytest.raises(ValueError):
+        with pytest.raises(YAMLConfigError):
             validate_task_type_config(task)
 
     def test_flatten_config(self):
         """Test flattening hierarchical config"""
         config = {
-            "name": "Test",
-            "tasks": [{"name": "t1"}],
-            "dependencies": [
-                {
-                    "name": "Child",
-                    "tasks": [{"name": "t2"}],
-                }
-            ],
+            "system": {
+                "name": "Test",
+                "tasks": [{"name": "t1"}],
+                "dependencies": [
+                    {
+                        "name": "Child",
+                        "tasks": [{"name": "t2"}],
+                    }
+                ],
+            }
         }
         result = flatten_config(config)
         assert isinstance(result, dict)
-        assert "name" in result
+        assert "test" in result
+        assert "child" in result
+        assert result["child"]["parent_id"] == "test"
 
     def test_config_to_json_serializable(self):
         """Test converting config to JSON-serializable format"""
@@ -677,7 +688,11 @@ class TestErrorHandling:
         test_db.commit()
 
         # Valid status values should work
-        assert agent.status in [HealthStatus.UP, HealthStatus.DOWN, HealthStatus.UNKNOWN, HealthStatus.DEGRADED]
+        valid_statuses = (
+            HealthStatus.UP, HealthStatus.DOWN,
+            HealthStatus.UNKNOWN, HealthStatus.DEGRADED,
+        )
+        assert agent.status in valid_statuses
 
     def test_unicode_in_system_name(self, test_db):
         """Test system with unicode characters"""
@@ -721,13 +736,13 @@ class TestIntegration:
         )
         assert agent_response.status_code in [200, 201]
 
-        # 2. Create system
+        # 2. Create system (agent_id is the integer DB id from registration)
         system_response = client.post(
             "/api/v1/systems",
             json={
                 "system_id": "workflow-sys",
                 "name": "Workflow Test",
-                "agent_id": "workflow-agent",
+                "agent_id": agent_response.json()["id"],
                 "config": {
                     "name": "Workflow",
                     "tasks": [],

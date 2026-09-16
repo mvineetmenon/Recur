@@ -47,3 +47,24 @@ logs/
 # Server
 /server/data/
 /server/db.sqlite3
+
+# Test artifacts
+.coverage
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+ACCESS.md
+TASK.md
+PROGRESS.md
+REPORT.md
+BLOCKED.md
+kilo.json
+
+# Local agent state (never commit)
+.kilo/
+
+# LAN-specific build files (never commit to the public repo)
+Dockerfile.server.lan
+docker-compose.lan.yml
+ubuntu.sources

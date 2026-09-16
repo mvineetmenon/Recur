@@ -4,57 +4,97 @@ A production-ready, YAML-driven system health monitoring platform that supports 
 
 ## Features
 
-✅ **Recursive Dependency Checking** - System health evaluated hierarchically; overall status depends on all nested dependencies  
-✅ **YAML-Driven Configuration** - Define entire system topology in simple, readable YAML files  
-✅ **Lightweight Agent** - Pure Bash + minimal Python; minimal system overhead  
-✅ **Real-Time Dashboard** - Modern web UI showing system status and dependency trees  
-✅ **Multiple Health Check Types** - HTTP/HTTPS, TCP ports, shell commands, ping, custom scripts  
-✅ **REST API** - Full API for integrations and automation  
-✅ **Easy Installation** - Single-command agent and server setup  
-✅ **Resilient & Observable** - Comprehensive logging, graceful failure handling, retry logic  
+- **Recursive Dependency Checking** - System health evaluated hierarchically; overall status depends on all nested dependencies
+- **YAML-Driven Configuration** - Define entire system topology in simple, readable YAML files
+- **Lightweight Agent** - Pure Bash + minimal Python; minimal system overhead
+- **Web Dashboard** - Auto-refreshing UI showing system status; full dependency trees via the `/tree` API
+- **Multiple Health Check Types** - HTTP/HTTPS, TCP ports, ping, shell commands, custom scripts
+- **REST API** - Full API for integrations and automation
+- **Easy Installation** - Single-command agent and server setup, standalone or Dockerized
+- **Resilient & Observable** - Comprehensive logging, graceful failure handling, retry logic
 
 ## Architecture
 
 ```
 Agents (Remote Machines)              Central Server (FastAPI)         Dashboard (Web UI)
-┌──────────────────────────┐          ┌──────────────────┐            ┌──────────────┐
-│  recur-agent.sh          │          │  REST API        │            │  Web Browser │
-│  - Read YAML config      ├─────────>│  - Ingest status │<───────────┤  - View      │
-│  - Execute health checks │  POST    │  - Eval tree     │   WebSocket│    systems   │
-│  - Push JSON results     │          │  - Store history │            │  - Expand    │
-└──────────────────────────┘          │                  │            │    tree      │
-         ▲                             │  SQLite/PgSQL DB │            │              │
-         │                             └──────────────────┘            └──────────────┘
+┌──────────────────────────┐           ┌──────────────────┐            ┌──────────────┐
+│  recur-agent.sh          │           │  REST API        │            │  Web Browser │
+│  - Read YAML config      ├─────────> │  - Ingest status │<───────────┤  - View      │
+│  - Execute health checks │  POST     │  - Eval tree     │  auto-     │    systems   │
+│  - Push JSON results     │           │  - Store history │            │  - Expand    │
+└──────────────────────────┘           │                  │            │    tree      │
+         ▲                             │  SQLite/PgSQL DB │            └──────────────┘
+         │                             └──────────────────┘
     Configurable
      Interval
 ```
 
-## Quick Start
+## Installation
 
-### Server Setup
+The central server can run two ways:
+
+- **Standalone** - from source in a Python virtualenv (recommended for development)
+- **Dockerized** - via Docker Compose (recommended for deployment)
+
+Agents are installed identically either way: on each machine you monitor, as a native systemd service.
+
+### Prerequisites
+
+- **Standalone:** Python 3.12+, Bash 4.0+, curl, git
+- **Dockerized:** Docker Engine with the Compose plugin (`docker compose version`)
+
+### Option 1: Standalone (source + venv)
 
 ```bash
-cd /workspaces/Recur
+git clone https://github.com/mvineetmenon/Recur.git
+cd Recur
 ./scripts/install-server.sh
-python server/app/main.py
-# Server runs on http://localhost:8000
-# Dashboard: http://localhost:8000/dashboard
+source venv/bin/activate
+python -m server.app.main
 ```
 
-### Agent Setup
+- Server: `http://localhost:8000`
+- Dashboard: `http://localhost:8000/dashboard`
+- Health: `http://localhost:8000/api/v1/health`
+
+### Option 2: Dockerized
 
 ```bash
-# On remote machine
-curl -s https://raw.githubusercontent.com/mvineetmenon/Recur/main/agent/install.sh | bash
-
-# Copy your config
-scp configs/example-system.yaml agent@remote:/etc/recur/config.yaml
-
-# Restart agent
-sudo systemctl restart recur-agent
+git clone https://github.com/mvineetmenon/Recur.git
+cd Recur
+docker compose up -d --build
 ```
 
-## YAML Configuration Schema
+- Server: `http://localhost:8000`
+- Dashboard: `http://localhost:8000/dashboard`
+- Health: `http://localhost:8000/api/v1/health`
+
+Notes:
+
+- The default profile runs the server only (SQLite, data in a named volume).
+- `docker compose --profile production up -d` additionally starts PostgreSQL and Redis.
+- Host port is configurable: `RECUR_HTTP_PORT=9000 docker compose up -d`
+- CORS is configurable (comma-separated origins, defaults to `*`): `CORS_ORIGINS="https://dash.example.com" docker compose up -d`
+
+### Agent (both options)
+
+```bash
+# On each remote machine you want to monitor from
+curl -s https://raw.githubusercontent.com/mvineetmenon/Recur/main/agent/install.sh | sudo bash
+
+# Edit the configuration (installed example: /etc/recur/config.yaml)
+sudo vim /etc/recur/config.yaml
+
+# If the server is not on this host, point the agent at it
+# (/etc/recur/agent.env, then: sudo systemctl daemon-reload)
+#   RECUR_AGENT_SERVER_URL=http://your-server:8000
+
+# Start the agent
+sudo systemctl start recur-agent
+sudo systemctl enable recur-agent
+```
+
+## YAML Configuration
 
 ### Simple Example
 
@@ -71,20 +111,30 @@ system:
       timeout: 5
 ```
 
-### Complex Nested Example
+### Task Types
+
+| Type | Purpose | Key Fields |
+|------|---------|------------|
+| `http` / `https` | Check HTTP endpoint | `url`, `expected_status`, `timeout` |
+| `tcp` | Check TCP port | `host`, `port`, `timeout` |
+| `ping` | ICMP ping | `host`, `timeout` |
+| `command` | Execute shell command (exit 0 = success) | `command`, `timeout` |
+| `script` | Execute local script | `path`, `timeout` |
+
+### Complex Example
+
+`configs/complex-cluster.yaml` contains a production-like configuration with nested
+dependencies (web tier, database layer, cache, backup, message queue). Excerpt:
 
 ```yaml
 system:
   name: "Production Cluster"
-  description: "Full production environment"
   interval: 60
-  
   tasks:
     - name: "cluster_ping"
       type: ping
       host: "cluster.example.com"
       timeout: 2
-  
   dependencies:
     - name: "Web Tier"
       interval: 30
@@ -93,220 +143,66 @@ system:
           type: http
           url: "http://web1:8080/health"
           expected_status: 200
-      
       dependencies:
         - name: "SSL Certificates"
           tasks:
             - name: "cert_check"
               type: command
               command: "openssl s_client -connect api.example.com:443 </dev/null 2>/dev/null | openssl x509 -noout -dates"
-    
-    - name: "Database Layer"
-      tasks:
-        - name: "postgres_primary"
-          type: tcp
-          host: "db-primary.internal"
-          port: 5432
-        
-        - name: "postgres_replication"
-          type: command
-          command: "pg_isready -h db-primary.internal"
-      
-      dependencies:
-        - name: "Redis Cache"
-          tasks:
-            - name: "redis_port"
-              type: tcp
-              host: "redis.internal"
-              port: 6379
-        
-        - name: "Backup Storage"
-          tasks:
-            - type: http
-              url: "http://s3-backup:9000/minio/health/live"
-    
-    - name: "Message Queue"
-      tasks:
-        - type: http
-          url: "http://rabbitmq:15672/api/healthchecks/node"
-          timeout: 5
 ```
 
-## Supported Task Types
+More examples: `configs/simple-system.yaml`, `configs/multi-region.yaml`.
 
-| Type | Purpose | Example |
-|------|---------|---------|
-| `http` / `https` | Check HTTP endpoint | `url: https://api.example.com/health`, `expected_status: 200` |
-| `tcp` | Check TCP port | `host: db.internal`, `port: 5432` |
-| `command` | Execute shell command | `command: "pg_isready -h localhost"` (exit 0 = success) |
-| `ping` | ICMP ping | `host: example.com`, `timeout: 2` |
-| `script` | Execute local script | `path: /etc/recur/custom-checks.sh` |
+## REST API
 
-## REST API Endpoints
+All endpoints are under `/api/v1`:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Server health |
+| `POST` | `/agents/register` | Register an agent |
+| `GET` | `/agents` | List agents |
+| `GET` | `/agents/{agent_id}` | Agent details |
+| `GET` | `/agents/{agent_id}/systems` | Systems reported by agent |
+| `POST` | `/agents/{agent_id}/check` | Request an immediate check |
+| `PUT` | `/agents/{agent_id}/heartbeat` | Agent heartbeat |
+| `DELETE` | `/agents/{agent_id}` | Remove agent |
+| `POST` | `/status` | Submit a status report |
+| `POST` | `/systems` | Create a system |
+| `GET` | `/systems` | List systems |
+| `GET` | `/systems/{system_id}` | System details |
+| `PUT` | `/systems/{system_id}` | Update a system |
+| `GET` | `/systems/{system_id}/tree` | Full dependency tree |
+| `GET` | `/systems/{system_id}/health` | Latest health summary |
+| `GET` | `/systems/{system_id}/history` | Status report history |
+| `DELETE` | `/systems/{system_id}` | Remove system |
+
+Examples:
 
 ```bash
-# Register agent
-POST /api/v1/agents/register
-{
-  "agent_id": "prod-web-01",
-  "hostname": "prod-web-01.internal",
-  "ip_address": "10.0.1.42"
-}
+# Register an agent
+curl -X POST http://localhost:8000/api/v1/agents/register \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id":"prod-web-01","hostname":"prod-web-01","ip_address":"10.0.1.42"}'
 
-# Push status report
-POST /api/v1/status
-{
-  "agent_id": "prod-web-01",
-  "timestamp": "2026-09-06T10:30:00Z",
-  "system_status": { ... }
-}
-
-# Query system status
-GET /api/v1/systems/{system_id}
-GET /api/v1/systems/{system_id}/tree    # Full dependency tree
-
-# List all systems
-GET /api/v1/systems
-
-# Get agent status
-GET /api/v1/agents/{agent_id}
+# Submit a status report
+curl -X POST http://localhost:8000/api/v1/status \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id":"prod-web-01","timestamp":"2026-09-06T10:30:00Z","system_status":{...}}'
 ```
 
-## Directory Structure
-
-```
-Recur/
-├── README.md                  # This file
-├── pyproject.toml
-├── requirements.txt
-├── docker-compose.yml
-│
-├── server/                    # Central server
-│   ├── app/
-│   │   ├── main.py           # FastAPI application entry
-│   │   ├── config.py         # Configuration management
-│   │   ├── models.py         # Database models
-│   │   ├── database.py       # SQLAlchemy setup
-│   │   ├── schemas.py        # Pydantic schemas
-│   │   ├── routers/          # API endpoints
-│   │   ├── services/         # Business logic
-│   │   ├── utils/            # Utilities (YAML loading, logging)
-│   │   └── templates/        # Web UI templates
-│   └── tests/                # Test suite
-│
-├── agent/                     # Lightweight agent
-│   ├── recur-agent.sh        # Main agent script (Bash)
-│   ├── health_check_utils.py # Python utilities
-│   ├── install.sh            # Installation script
-│   └── config.example.yaml   # Example configuration
-│
-├── configs/                   # Example configurations
-│   ├── simple-system.yaml
-│   ├── complex-cluster.yaml
-│   └── multi-region.yaml
-│
-└── scripts/                   # Setup scripts
-    ├── install-server.sh
-    ├── uninstall-server.sh
-    ├── init-db.sh
-    └── dev-setup.sh
-```
-
-## Installation
-
-### Prerequisites
-
-- Python 3.11+
-- Bash 4.0+
-- curl
-- git
-
-### Server Installation
-
-```bash
-git clone https://github.com/mvineetmenon/Recur.git
-cd Recur
-./scripts/install-server.sh
-source venv/bin/activate
-python server/app/main.py
-```
-
-### Agent Installation
-
-```bash
-# On each remote machine you want to monitor from
-curl -s https://raw.githubusercontent.com/mvineetmenon/Recur/main/agent/install.sh | bash
-
-# Edit the configuration
-sudo vim /etc/recur/config.yaml
-
-# Start the agent
-sudo systemctl start recur-agent
-sudo systemctl enable recur-agent
-```
-
-### Docker Compose (Development)
-
-```bash
-docker-compose up -d
-# Server: http://localhost:8000
-# Dashboard: http://localhost:8000/dashboard
-```
-
-## Configuration Examples
-
-### Example 1: Simple Website Monitoring
-
-```yaml
-system:
-  name: "Website"
-  description: "Public website endpoint"
-  interval: 60
-  tasks:
-    - name: "homepage"
-      type: http
-      url: "https://example.com/"
-      expected_status: 200
-      timeout: 5
-    - name: "api_endpoint"
-      type: http
-      url: "https://api.example.com/v1/status"
-      expected_status: 200
-      timeout: 5
-```
-
-### Example 2: Multi-Tier Application Stack
-
-See `configs/complex-cluster.yaml` for a production-like configuration.
-
-## Usage
-
-### Dashboard
+## Dashboard & Usage
 
 Navigate to `http://localhost:8000/dashboard` to view:
-- All monitored systems with current status (🟢 UP / 🔴 DOWN)
-- Expandable dependency tree showing nested components
-- Last check time and latency
-- Error messages for failed checks
-- Manual trigger option for immediate checks
 
-### Command-Line: Trigger Manual Check
+- All monitored systems with current status (UP / DOWN / UNKNOWN), auto-refreshed every 10 seconds
+- System description and last check time
 
-```bash
-curl -X POST http://localhost:8000/api/v1/agents/prod-web-01/check
-
-# Response
-{
-  "agent_id": "prod-web-01",
-  "status": "checking",
-  "task_count": 8
-}
-```
-
-### Retrieve Full System Tree
+For the full hierarchical view (nested dependencies, per-task status, durations and
+errors), query the tree API:
 
 ```bash
-curl http://localhost:8000/api/v1/systems/prod-cluster/tree
+curl http://localhost:8000/api/v1/systems/{system_id}/tree
 
 # Response
 {
@@ -318,47 +214,92 @@ curl http://localhost:8000/api/v1/systems/prod-cluster/tree
       "name": "Web Tier",
       "status": "UP",
       "dependencies": [...]
-    },
-    ...
+    }
   ]
 }
 ```
 
-## Development
+Trigger a manual check on an agent:
 
-### Setup Development Environment
+```bash
+curl -X POST http://localhost:8000/api/v1/agents/prod-web-01/check
+
+# Response (request is accepted; the agent acts on its next interval)
+{
+  "agent_id": "prod-web-01",
+  "status": "check_requested",
+  "message": "Check requested - agent will run on next interval"
+}
+```
+
+## Project Layout
+
+```
+Recur/
+├── README.md                  # This file
+├── pyproject.toml
+├── requirements.txt
+├── docker-compose.yml
+├── Dockerfile.server
+│
+├── server/                    # Central server
+│   ├── app/
+│   │   ├── main.py            # FastAPI application entry
+│   │   ├── config.py          # Configuration management
+│   │   ├── models.py          # Database models
+│   │   ├── database.py        # SQLAlchemy setup
+│   │   ├── schemas.py         # Pydantic schemas
+│   │   ├── routers/           # API endpoints
+│   │   ├── services/          # Business logic
+│   │   ├── utils/             # Utilities (YAML loading, logging)
+│   │   └── templates/         # Web UI templates
+│   └── tests/                 # Test suite
+│
+├── agent/                     # Lightweight agent
+│   ├── recur-agent.sh         # Main agent script (Bash)
+│   ├── health_check_utils.py  # Python check executor
+│   ├── install.sh             # Installation script
+│   └── config.example.yaml    # Example configuration
+│
+├── configs/                   # Example configurations
+│   ├── simple-system.yaml
+│   ├── complex-cluster.yaml
+│   └── multi-region.yaml
+│
+└── scripts/                   # Setup scripts
+    ├── install-server.sh
+    ├── dev-setup.sh
+    └── api-examples.sh
+```
+
+## Development
 
 ```bash
 ./scripts/dev-setup.sh
 source venv/bin/activate
-pytest server/tests/
 ```
 
-### Running Tests
+Run the test suite:
 
 ```bash
-pytest -v --cov=server/app
+make test          # or: pytest -v --cov=server/app
 ```
 
-### Code Style
-
-- Use `black` for formatting
-- Use `flake8` for linting
-- Use `mypy` for type checking
+Code style (also enforced via pre-commit):
 
 ```bash
-black server/
-flake8 server/
-mypy server/
+make lint          # or: black --check server/ && flake8 server/ && mypy server/
+make format        # black + isort
 ```
 
 ## Deployment
 
 ### Production Checklist
 
-- [ ] Configure `.env` with production database (PostgreSQL recommended)
+- [ ] Configure `DATABASE_URL` with production database (PostgreSQL recommended)
 - [ ] Set `DEBUG=false`
-- [ ] Configure TLS/HTTPS certificates
+- [ ] Restrict CORS via `CORS_ORIGINS`
+- [ ] Configure TLS/HTTPS certificates (reverse proxy)
 - [ ] Set up log aggregation
 - [ ] Configure monitoring and alerting
 - [ ] Set appropriate check intervals based on SLA
@@ -371,7 +312,7 @@ mypy server/
 server {
     listen 80;
     server_name monitoring.example.com;
-    
+
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
@@ -384,9 +325,11 @@ server {
 
 ### Agent not reporting status
 
-1. Check agent logs: `tail -f /var/log/recur-agent.log`
+1. Check agent logs: `sudo tail -f /var/log/recur/agent.log`
+   (systemd installs; the script default is `/var/log/recur-agent.log`)
 2. Verify configuration: `sudo cat /etc/recur/config.yaml`
-3. Test connectivity: `curl -X POST http://server:8000/api/v1/status -d '...'`
+3. Test connectivity from the agent host to the server:
+   `curl http://your-server:8000/api/v1/health`
 
 ### All checks showing as DOWN
 
@@ -397,13 +340,14 @@ server {
 
 ### Dashboard not loading
 
-1. Check server logs: `tail -f server/logs/app.log`
-2. Verify FastAPI is running: `curl http://localhost:8000/health`
+1. Check server logs: `tail -f server/logs/server_app_main.log`
+2. Verify FastAPI is running: `curl http://localhost:8000/api/v1/health`
 3. Check browser console for JS errors
 
 ## Contributing
 
 Contributions welcome! Please:
+
 1. Fork the repository
 2. Create a feature branch
 3. Add tests for new features

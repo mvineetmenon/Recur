@@ -52,13 +52,6 @@ class AgentListResponse(BaseModel):
 # ==================== Task Schemas ====================
 
 
-class TaskConfig(BaseModel):
-    """Task configuration (polymorphic based on type)"""
-
-    task_type: str
-    config: Dict[str, Any]
-
-
 class TaskResultResponse(BaseModel):
     """Result of a single task"""
 
@@ -87,20 +80,6 @@ class SystemTaskRequest(BaseModel):
     config: Dict[str, Any]
 
 
-class SystemDependencyResponse(BaseModel):
-    """Dependency information in tree view"""
-
-    id: Optional[int]
-    name: str
-    status: HealthStatus
-    last_check_time: Optional[datetime]
-    tasks: List[TaskResultResponse] = []
-    dependencies: List["SystemDependencyResponse"] = []
-
-    class Config:
-        from_attributes = True
-
-
 class SystemTreeResponse(BaseModel):
     """Full system dependency tree"""
 
@@ -111,7 +90,7 @@ class SystemTreeResponse(BaseModel):
     last_check_time: Optional[datetime]
     last_error: Optional[str]
     tasks: List[TaskResultResponse] = []
-    dependencies: List[SystemDependencyResponse] = []
+    dependencies: List["SystemTreeResponse"] = []
 
     class Config:
         from_attributes = True
@@ -129,7 +108,7 @@ class SystemResponse(BaseModel):
     last_error: Optional[str]
     created_at: datetime
     updated_at: datetime
-    agent_id: Optional[str]
+    agent_id: Optional[int]
 
     class Config:
         from_attributes = True
@@ -147,9 +126,17 @@ class SystemCreateRequest(BaseModel):
 
     system_id: str = Field(..., min_length=1, max_length=255)
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str]
+    description: Optional[str] = None
     config: Dict[str, Any]
-    agent_id: Optional[int]
+    agent_id: Optional[int] = None
+
+
+class SystemUpdateRequest(BaseModel):
+    """Update system request (partial)"""
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
 
 
 # ==================== Status Report Schemas ====================
@@ -161,20 +148,6 @@ class StatusReportRequest(BaseModel):
     agent_id: str
     timestamp: datetime
     system_status: Dict[str, Any]  # Full recursive status tree
-
-
-class StatusHistoryResponse(BaseModel):
-    """Historical status entry"""
-
-    id: int
-    system_id: str
-    agent_id: str
-    report_timestamp: datetime
-    received_at: datetime
-    status: HealthStatus
-
-    class Config:
-        from_attributes = True
 
 
 # ==================== Health Check Schemas ====================
@@ -189,26 +162,5 @@ class HealthCheckResponse(BaseModel):
     database: str
 
 
-class CheckTriggerResponse(BaseModel):
-    """Response when triggering a manual check"""
-
-    agent_id: str
-    status: str  # "checking", "scheduled", "error"
-    task_count: int
-    message: Optional[str]
-
-
-# ==================== Error Schemas ====================
-
-
-class ErrorResponse(BaseModel):
-    """Standard error response"""
-
-    error: str
-    detail: Optional[str]
-    timestamp: datetime
-    request_id: Optional[str]
-
-
 # Update forward references for recursive models
-SystemDependencyResponse.model_rebuild()
+SystemTreeResponse.model_rebuild()

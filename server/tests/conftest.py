@@ -1,88 +1,103 @@
 """
 Pytest configuration for Recur tests
 
-This uses pytest_configure hook which runs BEFORE test collection,
-ensuring database patches are applied before any test modules are imported.
+All tests standardize on `server.app.*` imports. The database module is
+patched with a shared in-memory SQLite engine (StaticPool => one connection)
+BEFORE any test module imports the app. Each test gets its own session with a
+savepoint, so mid-test commits are rolled back at teardown (full isolation).
 """
 
 import os
 import sys
-from typing import Generator
 
 import pytest
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
-# CRITICAL: Use pytest_configure which runs BEFORE test collection
+# Make the repository root importable so `server.app` resolves from anywhere
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+
 def pytest_configure(config):
-    """
-    Configure pytest - runs BEFORE test collection.
-    Patch the database module before any test imports app.
-    """
-    # Setup path
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-    
-    # Create in-memory test engine
-    SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
-    
-    from app.models import Base
-    
+    """Patch the database module BEFORE any test imports the app."""
+    from server.app import database as database_module
+    from server.app.models import Base
+
     test_engine = create_engine(
-        SQLALCHEMY_DATABASE_URL,
+        "sqlite://",
         connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
         echo=False,
     )
-    
+
+    # pysqlite's legacy transaction handling breaks SAVEPOINT isolation
+    # (an implicit BEGIN is not issued, so releasing the outermost savepoint
+    # commits the data). Disable the driver's transaction management and
+    # emit BEGIN explicitly, as recommended in the pysqlite dialect docs.
+    @event.listens_for(test_engine, "connect")
+    def disable_pysqlite_tx(dbapi_connection, connection_record):
+        dbapi_connection.isolation_level = None
+
+    @event.listens_for(test_engine, "begin")
+    def emit_begin(conn):
+        conn.exec_driver_sql("BEGIN")
+
     # Enable foreign keys
     @event.listens_for(test_engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
-    
-    # Create tables
+
     Base.metadata.create_all(bind=test_engine)
-    
-    # Patch database module BEFORE app is imported by tests
-    import app.database as database_module
+
+    # Patch database module so the app uses the in-memory engine
     database_module.engine = test_engine
-    database_module.SessionLocal = sessionmaker(
-        autocommit=False, autoflush=False, bind=test_engine
-    )
-    
+    database_module.SessionLocal = SessionLocal_for(test_engine)
+
     # Store for fixture access
     config.test_engine = test_engine
-    
+
     # Register custom markers
     config.addinivalue_line("markers", "integration: integration tests")
     config.addinivalue_line("markers", "unit: unit tests")
-    config.addinivalue_line("markers", "slow: slow tests")
+    config.addinivalue_line("markers", "slow: slow running tests")
+
+
+def SessionLocal_for(engine):
+    """Session factory bound to the given engine"""
+    from sqlalchemy.orm import sessionmaker
+
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 @pytest.fixture(scope="session")
 def test_engine(pytestconfig):
-    """Provide test engine from config"""
+    """Provide shared in-memory test engine"""
     yield pytestconfig.test_engine
     pytestconfig.test_engine.dispose()
 
 
 @pytest.fixture
-def test_db(test_engine) -> Generator[Session, None, None]:
+def test_db(test_engine):
     """
-    Function-scoped database session with transaction rollback for test isolation
+    Function-scoped session with savepoint isolation.
+
+    The service layer commits mid-test; the savepoint makes those commits
+    reversible so every test starts from a clean database.
     """
-    TestSessionLocal = sessionmaker(
-        autocommit=False,
-        autoflush=False,
-        bind=test_engine,
-    )
-    
     connection = test_engine.connect()
     transaction = connection.begin()
-    session = TestSessionLocal(bind=connection)
-    
+    # The session transaction becomes a SAVEPOINT inside the outer
+    # transaction, so mid-test commits (service layer) only release the
+    # savepoint; teardown rolls back everything.
+    session = Session(bind=connection, join_transaction_mode="create_savepoint")
+
     yield session
-    
+
     session.close()
     transaction.rollback()
     connection.close()
@@ -90,35 +105,38 @@ def test_db(test_engine) -> Generator[Session, None, None]:
 
 @pytest.fixture
 def client(test_db):
-    """
-    FastAPI TestClient with test database
-    Database is already patched in pytest_configure before test collection
-    """
-    from app.main import app
-    from app.database import get_db
-    
-    # Override get_db dependency
-    def override_get_db():
-        try:
-            yield test_db
-        finally:
-            pass
-    
-    app.dependency_overrides[get_db] = override_get_db
-    
+    """FastAPI TestClient wired to the isolated test database"""
     from fastapi.testclient import TestClient
-    with TestClient(app) as test_client:
-        yield test_client
-    
-    app.dependency_overrides.clear()
+
+    from server.app import main as main_module
+    from server.app.database import get_db
+    from server.app.main import app
+
+    def override_get_db():
+        yield test_db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    # Tables already exist on the test engine (created in pytest_configure).
+    # Disable the app's init_db so the lifespan doesn't open a competing
+    # transaction on the shared StaticPool connection.
+    original_init_db = main_module.init_db
+    main_module.init_db = lambda: None
+
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        main_module.init_db = original_init_db
+        app.dependency_overrides.clear()
 
 
 # Pre-seeded fixtures
 @pytest.fixture
 def db_with_agent(test_db):
-    """Database with a test agent"""
-    from app.models import Agent, HealthStatus
-    
+    """Database session plus a registered test agent"""
+    from server.app.models import Agent, HealthStatus
+
     agent = Agent(
         agent_id="test-agent-1",
         hostname="test.local",
@@ -128,17 +146,17 @@ def db_with_agent(test_db):
     test_db.add(agent)
     test_db.commit()
     test_db.refresh(agent)
-    
+
     return test_db, agent
 
 
 @pytest.fixture
 def db_with_system(db_with_agent):
-    """Database with test agent and system"""
-    from app.models import System, HealthStatus
-    
+    """Database session plus test agent and system"""
+    from server.app.models import System, HealthStatus
+
     test_db, agent = db_with_agent
-    
+
     system = System(
         system_id="test-system-1",
         agent_id=agent.id,
@@ -149,5 +167,5 @@ def db_with_system(db_with_agent):
     test_db.add(system)
     test_db.commit()
     test_db.refresh(system)
-    
+
     return test_db, agent, system

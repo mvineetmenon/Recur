@@ -2,8 +2,7 @@
 Service for evaluating system health status recursively
 """
 
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
@@ -17,97 +16,159 @@ class StatusEvaluator:
     """Evaluates overall system status based on task and dependency results"""
 
     @staticmethod
-    def evaluate_system_status(system: System, db: Session) -> HealthStatus:
+    def evaluate_system_status(
+        system: System,
+        db: Session,
+        _seen: set | None = None,
+    ) -> HealthStatus:
         """
         Recursively evaluate system status based on tasks and dependencies
-        
+
         A system is UP only if:
         1. All its tasks are UP, AND
         2. All its dependent systems are UP (recursive)
-        
+
         Args:
             system: System to evaluate
             db: Database session
-            
+            _seen: Internal cycle guard (systems already on the recursion stack)
+
         Returns:
             Overall status for the system
         """
-        # Get latest task results
-        task_statuses = StatusEvaluator._get_task_statuses(system, db)
-        
-        # If no tasks, check dependencies
-        if not task_statuses:
-            dep_statuses = StatusEvaluator._get_dependency_statuses(system, db)
-            if not dep_statuses:
+        seen = _seen if _seen is not None else set()
+        if system.id in seen:
+            # Cycle guard: a dependency loop must not recurse forever
+            return HealthStatus.UNKNOWN
+        seen.add(system.id)
+        try:
+            # Get latest task results and recursive dependency statuses
+            task_statuses = StatusEvaluator._get_task_statuses(system, db)
+            dep_statuses = StatusEvaluator._get_dependency_statuses(system, db, seen)
+
+            # No data at all (no tasks, no dependencies)
+            if not task_statuses and not dep_statuses:
                 return HealthStatus.UNKNOWN
-            return HealthStatus.UP if all(s == HealthStatus.UP for s in dep_statuses) else HealthStatus.DOWN
-        
-        # All tasks must be UP
-        tasks_ok = all(status == HealthStatus.UP for status in task_statuses)
-        
-        if not tasks_ok:
-            logger.debug(f"System {system.system_id}: tasks not all UP")
-            return HealthStatus.DOWN
-        
-        # Check dependencies
-        dep_statuses = StatusEvaluator._get_dependency_statuses(system, db)
-        
-        if dep_statuses:
-            deps_ok = all(status == HealthStatus.UP for status in dep_statuses)
-            if not deps_ok:
-                logger.debug(f"System {system.system_id}: dependencies not all UP")
+
+            # Any DOWN anywhere makes the system DOWN
+            if any(s == HealthStatus.DOWN for s in task_statuses) or any(
+                s == HealthStatus.DOWN for s in dep_statuses
+            ):
                 return HealthStatus.DOWN
-        
-        return HealthStatus.UP
+
+            # UP only when every task and every dependency is UP
+            if all(s == HealthStatus.UP for s in task_statuses) and all(
+                s == HealthStatus.UP for s in dep_statuses
+            ):
+                return HealthStatus.UP
+
+            # Otherwise some data is missing (UNKNOWN) or mixed
+            return HealthStatus.UNKNOWN
+        finally:
+            # Keep `seen` as the recursion stack so shared (diamond)
+            # dependencies are still evaluated on every path
+            seen.discard(system.id)
 
     @staticmethod
     def _get_task_statuses(system: System, db: Session) -> List[HealthStatus]:
-        """Get statuses of all tasks for a system"""
+        """Get statuses of all tasks for a system (latest result per task)"""
+        latest = StatusEvaluator._latest_results_for_tasks(system.tasks, db)
+
         statuses = []
-        
         for task in system.tasks:
-            # Get most recent result
-            latest_result = (
-                db.query(TaskResult)
-                .filter(TaskResult.task_id == task.id)
-                .order_by(TaskResult.created_at.desc())
-                .first()
-            )
-            
-            if latest_result:
-                statuses.append(latest_result.status)
+            result = latest.get(task.id)
+            if result:
+                statuses.append(result.status)
             else:
                 statuses.append(HealthStatus.UNKNOWN)
-        
+
         return statuses
 
     @staticmethod
-    def _get_dependency_statuses(system: System, db: Session) -> List[HealthStatus]:
+    def _latest_results_for_tasks(
+        tasks: List[Task], db: Session
+    ) -> Dict[int, TaskResult]:
+        """
+        Fetch the most recent TaskResult for each task in a single query.
+
+        Returns a mapping of task primary key -> latest result.
+        """
+        if not tasks:
+            return {}
+
+        task_ids = [task.id for task in tasks]
+        results = (
+            db.query(TaskResult)
+            .filter(TaskResult.task_id.in_(task_ids))
+            .order_by(TaskResult.created_at.desc(), TaskResult.id.desc())
+            .all()
+        )
+
+        latest: Dict[int, TaskResult] = {}
+        for result in results:
+            if result.task_id not in latest:
+                latest[result.task_id] = result
+        return latest
+
+    @staticmethod
+    def _get_dependency_statuses(
+        system: System, db: Session, _seen: set
+    ) -> List[HealthStatus]:
         """
         Recursively get statuses of all dependent systems
         """
         statuses = []
-        
+
         for dep in system.dependencies:
             child_system = dep.child_system
             if child_system:
-                status = StatusEvaluator.evaluate_system_status(child_system, db)
+                status = StatusEvaluator.evaluate_system_status(child_system, db, _seen)
                 statuses.append(status)
-        
+
         return statuses
 
     @staticmethod
-    def get_system_tree(system: System, db: Session) -> Dict[str, Any]:
+    def get_system_tree(
+        system: System,
+        db: Session,
+        _seen: set | None = None,
+    ) -> Dict[str, Any]:
         """
         Build complete system tree with all statuses and task results
-        
+
         Args:
             system: Root system
             db: Database session
-            
+            _seen: Internal cycle guard (systems already on the recursion stack)
+
         Returns:
             Nested dictionary representing the system tree
         """
+        seen = _seen if _seen is not None else set()
+        if system.id in seen:
+            # Cycle guard: stop instead of recursing forever
+            logger.warning(f"Dependency cycle detected at {system.system_id}")
+            return {
+                "system_id": system.system_id,
+                "name": system.name,
+                "description": system.description,
+                "status": system.status,
+                "last_check_time": system.last_check_time,
+                "last_error": system.last_error,
+                "tasks": [],
+                "dependencies": [],
+            }
+        seen.add(system.id)
+        try:
+            return StatusEvaluator._build_tree(system, db, seen)
+        finally:
+            seen.discard(system.id)
+
+    @staticmethod
+    def _build_tree(
+        system: System, db: Session, seen: set
+    ) -> Dict[str, Any]:
+        """Assemble one level of the system tree (recursion stack in `seen`)"""
         tree = {
             "system_id": system.system_id,
             "name": system.name,
@@ -119,47 +180,53 @@ class StatusEvaluator:
             "dependencies": [],
         }
 
-        # Add task results
+        # Add task results (one query for the whole level)
+        latest = StatusEvaluator._latest_results_for_tasks(system.tasks, db)
         for task in system.tasks:
-            latest_result = (
-                db.query(TaskResult)
-                .filter(TaskResult.task_id == task.id)
-                .order_by(TaskResult.created_at.desc())
-                .first()
-            )
-            
-            if latest_result:
+            result = latest.get(task.id)
+            if result:
                 tree["tasks"].append({
                     "task_id": task.task_id,
                     "name": task.name,
-                    "type": task.task_type,
-                    "status": latest_result.status,
-                    "duration_ms": latest_result.duration_ms,
-                    "error": latest_result.error_message,
+                    "task_type": task.task_type,
+                    "status": result.status,
+                    "duration_ms": result.duration_ms,
+                    "error_message": result.error_message,
+                    "output_data": result.output_data,
                 })
-        
+            else:
+                tree["tasks"].append({
+                    "task_id": task.task_id,
+                    "name": task.name,
+                    "task_type": task.task_type,
+                    "status": HealthStatus.UNKNOWN,
+                    "duration_ms": None,
+                    "error_message": None,
+                    "output_data": None,
+                })
+
         # Recursively add dependencies
         for dep in system.dependencies:
             if dep.child_system:
-                dep_tree = StatusEvaluator.get_system_tree(dep.child_system, db)
+                dep_tree = StatusEvaluator.get_system_tree(dep.child_system, db, seen)
                 tree["dependencies"].append(dep_tree)
-        
+
         return tree
 
     @staticmethod
     def get_system_health_summary(system: System, db: Session) -> Dict[str, Any]:
         """
         Get a summary of system health without full tree details
-        
+
         Args:
             system: System to summarize
             db: Database session
-            
+
         Returns:
             Health summary
         """
         status = StatusEvaluator.evaluate_system_status(system, db)
-        
+
         # Count tasks by status
         task_results = (
             db.query(TaskResult)
@@ -167,16 +234,16 @@ class StatusEvaluator:
             .filter(Task.system_id == system.id)
             .order_by(TaskResult.created_at.desc())
         ).all()
-        
+
         task_statuses = {}
         seen_tasks = set()
-        
+
         for result in task_results:
             if result.task_id not in seen_tasks:
                 status_val = result.status.value
                 task_statuses[status_val] = task_statuses.get(status_val, 0) + 1
                 seen_tasks.add(result.task_id)
-        
+
         return {
             "system_id": system.system_id,
             "name": system.name,

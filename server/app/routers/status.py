@@ -5,14 +5,13 @@ Status report endpoints
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Agent
 from ..schemas import (
     HealthCheckResponse,
-    StatusHistoryResponse,
     StatusReportRequest,
 )
 from ..services.health_check import HealthCheckProcessor
@@ -30,7 +29,7 @@ async def submit_status_report(
 ):
     """
     Accept a status report from an agent
-    
+
     This endpoint receives the complete status tree from an agent and processes it,
     updating all task results and system statuses in the database.
     """
@@ -43,11 +42,20 @@ async def submit_status_report(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent '{report.agent_id}' not found. Please register first.",
             )
-        
+
         # Get system ID from report
         system_status = report.system_status
-        system_id = system_status.get("system_id") or system_status.get("name", "").lower().replace(" ", "-")
-        
+        system_id = (
+            system_status.get("system_id")
+            or system_status.get("name", "").lower().replace(" ", "-")
+        )
+
+        if not system_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Report is missing 'system_id' (or a 'name' to derive it from)",
+            )
+
         # Process the report
         status_report = HealthCheckProcessor.process_status_report(
             agent_id=agent.id,
@@ -56,13 +64,13 @@ async def submit_status_report(
             report_data=system_status,
             db=db,
         )
-        
+
         return {
             "status": "accepted",
             "report_id": status_report.id,
             "processed_at": datetime.utcnow().isoformat(),
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -76,24 +84,24 @@ async def submit_status_report(
 @router.get("/systems/{system_id}/history", response_model=dict)
 async def get_system_status_history(
     system_id: str,
-    limit: int = 50,
-    db: Annotated[Session, Depends(get_db)] = None,
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = Query(50, ge=1, le=1000),
 ):
     """
     Get historical status reports for a system
-    
+
     Args:
         system_id: System ID
         limit: Maximum number of reports to return
     """
     reports = HealthCheckProcessor.get_system_history(system_id, db, limit=limit)
-    
+
     if not reports:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No history found for system {system_id}",
         )
-    
+
     return {
         "system_id": system_id,
         "count": len(reports),

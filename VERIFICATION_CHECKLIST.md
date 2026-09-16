@@ -6,11 +6,11 @@ Use this checklist to verify your Recur installation and setup.
 
 ### Server Setup
 
-- [ ] Python 3.11+ installed: `python3 --version`
+- [ ] Python 3.12+ installed: `python3 --version`
 - [ ] Virtual environment created: `ls -d venv`
 - [ ] Dependencies installed: `pip list | grep fastapi`
 - [ ] Database initialized: `ls -f recur.db` or check PostgreSQL
-- [ ] Server starts: `python server/app/main.py`
+- [ ] Server starts: `python3 -m server.app.main`
 - [ ] Health check responds: `curl http://localhost:8000/api/v1/health`
 - [ ] Dashboard accessible: `curl http://localhost:8000/dashboard`
 
@@ -160,7 +160,6 @@ Use this checklist to verify your Recur installation and setup.
 - [ ] QUICK_START.md has clear instructions
 - [ ] ARCHITECTURE.md explains design
 - [ ] CONTRIBUTING.md guides development
-- [ ] DELIVERY_SUMMARY.md shows features
 - [ ] Inline code comments present
 - [ ] API examples work: `bash scripts/api-examples.sh`
 
@@ -169,10 +168,10 @@ Use this checklist to verify your Recur installation and setup.
 ### Docker Compose
 
 - [ ] Docker installed: `docker --version`
-- [ ] Docker Compose installed: `docker-compose --version`
-- [ ] Services start: `docker-compose up -d`
-- [ ] Server responsive: `curl http://localhost:8000/health`
-- [ ] Services stop gracefully: `docker-compose down`
+- [ ] Docker Compose installed: `docker compose version`
+- [ ] Services start: `docker compose up -d`
+- [ ] Server responsive: `curl http://localhost:8000/api/v1/health`
+- [ ] Services stop gracefully: `docker compose down`
 
 ### Installation Scripts
 
@@ -219,7 +218,7 @@ Use this checklist to verify your Recur installation and setup.
 
 ## ✅ Logging Verification
 
-- [ ] Server logs to file: `tail -f server/logs/app.log`
+- [ ] Server logs to file: `tail -f server/logs/server_app_main.log`
 - [ ] Agent logs to file: `tail -f /var/log/recur/agent.log`
 - [ ] Log format is consistent
 - [ ] Error messages are helpful
@@ -239,7 +238,7 @@ Use this checklist to verify your Recur installation and setup.
 
 If any check fails, refer to the troubleshooting section in:
 - [README.md](README.md#troubleshooting)
-- [QUICK_START.md](QUICK_START.md#9-troubleshooting)
+- [QUICK_START.md](QUICK_START.md#7-troubleshooting)
 - [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## ✨ Optional Enhancements to Try

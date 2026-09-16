@@ -28,8 +28,8 @@ fi
 PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
 echo "Found Python $PYTHON_VERSION"
 
-if (( $(echo "$PYTHON_VERSION < 3.11" | bc -l) )); then
-    echo "ERROR: Python 3.11+ is required"
+if (( $(echo "$PYTHON_VERSION < 3.12" | bc -l) )); then
+    echo "ERROR: Python 3.12+ is required"
     exit 1
 fi
 
@@ -72,7 +72,7 @@ echo "1. Activate virtual environment:"
 echo "   source venv/bin/activate"
 echo ""
 echo "2. Start the server:"
-echo "   python server/app/main.py"
+echo "   python -m server.app.main"
 echo ""
 echo "3. Access the dashboard:"
 echo "   http://localhost:8000/dashboard"

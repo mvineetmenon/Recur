@@ -103,7 +103,8 @@ make format
 # Run linting
 make lint
 
-# Type checking
+# Type checking (note: mypy currently reports pre-existing errors on
+# SQLAlchemy 1.x-style Column definitions; see REPORT.md — keep new code clean)
 mypy server/
 ```
 
@@ -117,8 +118,7 @@ Recur/
 │   └── logs/        # Log files
 ├── agent/           # Health check agent
 ├── configs/         # Example configurations
-├── scripts/         # Setup and utility scripts
-└── docs/            # Documentation
+└── scripts/         # Setup and utility scripts
 ```
 
 ## Key Files

@@ -1,50 +1,51 @@
-# Recur Agent Configuration
-# This file defines the systems and health checks to monitor
-
-# Server connection
-# server_url: http://monitoring-server:8000
-# agent_id: prod-web-01  # Defaults to hostname if not specified
+# Recur Agent Example Configuration
+# Copy to /etc/recur/config.yaml and adjust targets for your environment.
+#
+# Task types: http, https, tcp, ping, command, script
+# Nested systems go under `dependencies` (recursively).
 
 system:
-  name: "My Application Stack"
-  description: "Application and its dependencies"
-  interval: 60  # seconds between checks
-  
+  name: "Local Services"
+  description: "Example agent configuration (edit targets)"
+  interval: 60  # Check every 60 seconds
+
   tasks:
-    # Check if the application is running
-    - name: "app_health"
+    - name: "server_health"
       type: http
-      url: "http://localhost:8000/health"
+      url: "http://localhost:8000/api/v1/health"
       expected_status: 200
       timeout: 5
-  
+
+    - name: "disk_ok"
+      type: command
+      command: 'df -P / | awk "NR==2 {exit ($5+0 >= 90)}"'
+      timeout: 10
+
+    - name: "port_8000"
+      type: tcp
+      host: "localhost"
+      port: 8000
+      timeout: 5
+
+    - name: "ping_gateway"
+      type: ping
+      host: "127.0.0.1"
+      timeout: 5
+
+    # Script checks: exit code 0 = UP
+    # - name: "custom_check"
+    #   type: script
+    #   path: "/opt/recur/checks/mycheck.sh"
+    #   timeout: 30
+
   dependencies:
-    # Database dependency
     - name: "Database"
-      description: "PostgreSQL database server"
+      id: "db"
+      description: "Nested example dependency (remove if unused)"
+      criticality: HIGH
       tasks:
-        - name: "postgres_port"
+        - name: "db_port"
           type: tcp
           host: "localhost"
           port: 5432
-          timeout: 3
-        
-        - name: "postgres_status"
-          type: command
-          command: "pg_isready -h localhost"
-          timeout: 5
-    
-    # Cache dependency
-    - name: "Cache"
-      description: "Redis cache"
-      tasks:
-        - name: "redis_port"
-          type: tcp
-          host: "localhost"
-          port: 6379
-          timeout: 3
-        
-        - name: "redis_ping"
-          type: command
-          command: "redis-cli ping | grep PONG"
           timeout: 5

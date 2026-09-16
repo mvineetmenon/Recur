@@ -54,7 +54,7 @@ Recur is a distributed health monitoring system with three main components:
 
 ### 1. Central Server (Python/FastAPI)
 
-**Location**: `/workspaces/Recur/server/app/`
+**Location**: `server/app/` (repo root)
 
 #### Application Structure
 
@@ -88,17 +88,17 @@ main.py                  # FastAPI app initialization, lifespan management
 **Core Tables**:
 
 ```
-┌─────────────┐
-│   Agents    │  (Remote monitoring agents)
-├─────────────┤
-│ id          │ (Primary Key)
-│ agent_id    │ (Unique identifier)
-│ hostname    │
-│ ip_address  │
-│ status      │ (UP, DOWN, UNKNOWN, DEGRADED)
-│ last_heart  │
-│ created_at  │
-└─────────────┘
+┌──────────────────┐
+│     Agents       │  (Remote monitoring agents)
+├──────────────────┤
+│ id               │ (Primary Key)
+│ agent_id         │ (Unique identifier)
+│ hostname         │
+│ ip_address       │
+│ status           │ (UP, DOWN, UNKNOWN, DEGRADED)
+│ last_heartbeat   │
+│ registered_at    │
+└──────────────────┘
 
 ┌──────────────┐
 │   Systems    │  (Monitored systems)
@@ -162,7 +162,7 @@ main.py                  # FastAPI app initialization, lifespan management
 
 ### 2. Agent (Bash + Python)
 
-**Location**: `/workspaces/Recur/agent/`
+**Location**: `agent/` (repo root)
 
 #### Execution Flow
 
@@ -288,7 +288,7 @@ No code changes needed to add new systems or checks.
 - Pure Bash when possible
 - Python only for YAML parsing and complex logic
 - Minimal dependencies
-- Self-contained in `/usr/local/bin/`
+- Installed under `/usr/local/lib/recur/` (symlinked into `/usr/local/bin/`)
 - Systemd service for management
 
 ### 4. REST API First
@@ -408,7 +408,7 @@ central.example.com:8000 (Server)
 Recur itself should be monitored:
 - Server health endpoint: `/api/v1/health`
 - Database connectivity checks
-- Agent heartbeats (timeout after 5 minutes)
+- Agent heartbeats (`last_heartbeat` refreshed by each report/heartbeat)
 - Reporting lag (when reports become old)
 
 ## Extension Points
@@ -428,7 +428,7 @@ Recur itself should be monitored:
 - Command: ~100ms-10s (varies)
 - Report submission: <100ms (local processing)
 - Status evaluation: O(n) where n = total tasks across tree
-- Dashboard refresh: ~10s (configurable)
+- Dashboard refresh: 10s (fixed, in `templates/dashboard.html`)
 
 ---
 

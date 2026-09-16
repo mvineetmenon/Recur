@@ -40,7 +40,7 @@ AGENT_RESPONSE=$(curl -s -X POST "$SERVER/api/v1/agents/register" \
     "version": "0.1.0",
     "os_type": "Linux",
     "cpu_count": 4,
-    "python_version": "3.11.0"
+    "python_version": "3.12.0"
   }')
 echo "$AGENT_RESPONSE" | jq .
 AGENT_ID=$(echo "$AGENT_RESPONSE" | jq -r '.agent_id')
@@ -79,7 +79,7 @@ SYSTEM_RESPONSE=$(curl -s -X POST "$SERVER/api/v1/systems" \
         {
           "name": "api_health",
           "type": "http",
-          "url": "http://localhost:8000/health",
+          "url": "http://localhost:8000/api/v1/health",
           "expected_status": 200,
           "timeout": 5
         }
@@ -149,7 +149,7 @@ curl -s -X POST "$SERVER/api/v1/systems" \
         }
       ]
     }
-  }' | jq .)
+  }' | jq .
 
 print_section "9. List All Systems"
 echo "GET $SERVER/api/v1/systems"
@@ -249,7 +249,7 @@ curl -s -X POST "$SERVER/api/v1/status" \
         }
       ]
     }
-  }" | jq .)
+  }" | jq .
 
 # ============================================================================
 # UPDATES & DELETIONS
