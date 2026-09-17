@@ -49,12 +49,15 @@ Agents are installed identically either way: on each machine you monitor, as a n
 git clone https://github.com/mvineetmenon/Recur.git
 cd Recur
 ./scripts/install-server.sh
+cp .env.example .env   # optional: adjust settings (see Environment Variables)
 source venv/bin/activate
 python -m server.app.main
 ```
 
 Uses SQLite by default (`./recur.db`). To use PostgreSQL instead, set
-`DATABASE_URL` (e.g. `postgresql+psycopg2://user:pass@host:5432/recur`).
+`DATABASE_URL` in `.env` (e.g. `postgresql+psycopg2://user:pass@host:5432/recur`).
+The server loads `.env` automatically; real environment variables take
+precedence.
 
 - Server: `http://localhost:8000`
 - Dashboard: `http://localhost:8000/dashboard`
@@ -65,6 +68,7 @@ Uses SQLite by default (`./recur.db`). To use PostgreSQL instead, set
 ```bash
 git clone https://github.com/mvineetmenon/Recur.git
 cd Recur
+cp .env.example .env   # optional: adjust settings (see Environment Variables)
 docker compose up -d --build
 ```
 
@@ -76,10 +80,11 @@ Notes:
 
 - The default setup runs the server plus PostgreSQL (JSON columns are stored as JSONB).
 - `docker compose --profile production up -d` additionally starts Redis.
-- Host port is configurable: `RECUR_HTTP_PORT=9000 docker compose up -d`
-- Database password is configurable: `DB_PASSWORD=secret docker compose up -d`
-- Host port for PostgreSQL is configurable: `PG_HOST_PORT=15432 docker compose up -d`
-- CORS is configurable (comma-separated origins, defaults to `*`): `CORS_ORIGINS="https://dash.example.com" docker compose up -d`
+- All host ports, the database password, and the container's runtime
+  settings (e.g. `DEBUG`, `LOG_LEVEL`, `CORS_ORIGINS`) are configured in
+  `.env` — see [Environment Variables](#environment-variables). One-off
+  overrides still work inline, e.g.
+  `RECUR_HTTP_PORT=9000 DB_PASSWORD=secret docker compose up -d`.
 
 ### Agent (both options)
 
@@ -98,6 +103,60 @@ sudo vim /etc/recur/config.yaml
 sudo systemctl start recur-agent
 sudo systemctl enable recur-agent
 ```
+
+## Environment Variables
+
+All configuration lives in a single `.env` file that works in **both** run
+modes. Copy the documented template and adjust:
+
+```bash
+cp .env.example .env
+```
+
+- **Standalone:** the server loads `.env` automatically on startup (repo root,
+  or the current working directory) via `python-dotenv`.
+- **Dockerized:** `docker compose` loads `.env` automatically for variable
+  interpolation, and `docker-compose.yml` forwards the server variables into
+  the container.
+- **Agent:** the systemd unit reads `/etc/recur/agent.env` (created by
+  `agent/install.sh`); when running `recur-agent.sh` directly it loads
+  `RECUR_AGENT_ENV_FILE` (if set) or `./.env` from the current directory.
+- Real environment variables always take precedence over `.env` values.
+  `.env` is git-ignored; never commit it (it may contain credentials).
+
+### Server (standalone and dockerized)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DATABASE_URL` | `sqlite:///./recur.db` (standalone); derived from `DB_PASSWORD` (docker) | SQLAlchemy database URL, e.g. `postgresql+psycopg2://recur:secret@db.example.com:5432/recur` |
+| `DEBUG` | `false` | `true` enables debug logging and uvicorn auto-reload; keep `false` in production |
+| `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
+| `CORS_ORIGINS` | `*` | Comma-separated allowed origins; `*` allows all (dev default) |
+
+### Server (standalone only)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HOST` | `0.0.0.0` | Interface the server binds to (not used in docker mode) |
+| `PORT` | `8000` | Port the server listens on (in docker mode the container always listens on `8000`; map the host port with `RECUR_HTTP_PORT`) |
+
+### Docker Compose (host side only)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RECUR_HTTP_PORT` | `8000` | Host port the server is published on |
+| `PG_HOST_PORT` | `5432` | Host port the PostgreSQL container is published on |
+| `DB_PASSWORD` | `recur-dev-password` | Password of the PostgreSQL `recur` user, used by the default `DATABASE_URL`; set a strong value outside local dev |
+
+### Agent
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RECUR_AGENT_SERVER_URL` | `http://localhost:8000` | Base URL of the central server (no trailing path) |
+| `RECUR_AGENT_ID` | machine hostname | Unique agent identifier |
+| `RECUR_AGENT_CONFIG_FILE` | `/etc/recur/config.yaml` | YAML file with the systems, tasks, and dependencies to check |
+| `RECUR_AGENT_LOG_FILE` | `/var/log/recur-agent.log` | Agent log file (systemd installs use `/var/log/recur/agent.log`) |
+| `RECUR_AGENT_ENV_FILE` | `./.env` | `.env` file loaded when running the agent script directly (systemd uses `/etc/recur/agent.env` instead) |
 
 ## YAML Configuration
 
@@ -301,6 +360,7 @@ make format        # black + isort
 
 ### Production Checklist
 
+- [ ] Create `.env` from `.env.example` and review all values (see [Environment Variables](#environment-variables))
 - [ ] Set a strong `DB_PASSWORD` (or point `DATABASE_URL` at your own PostgreSQL)
 - [ ] Set `DEBUG=false`
 - [ ] Restrict CORS via `CORS_ORIGINS`

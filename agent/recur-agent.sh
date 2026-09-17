@@ -12,6 +12,20 @@ set -euo pipefail
 
 # Configuration
 AGENT_VERSION="0.1.0"
+
+# Optional .env-style overrides (KEY=value lines, see .env.example):
+# RECUR_AGENT_ENV_FILE if set, otherwise `./.env` in the current directory.
+# Loaded before the defaults below so it can override them. Under systemd the
+# unit's EnvironmentFile (/etc/recur/agent.env) is used instead.
+ENV_FILE="${RECUR_AGENT_ENV_FILE:-.env}"
+if [[ -f "$ENV_FILE" ]]; then
+    echo "Loading environment overrides from: $ENV_FILE"
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+fi
+
 CONFIG_FILE="${RECUR_AGENT_CONFIG_FILE:-/etc/recur/config.yaml}"
 SERVER_URL="${RECUR_AGENT_SERVER_URL:-http://localhost:8000}"
 AGENT_ID="${RECUR_AGENT_ID:-$(hostname)}"

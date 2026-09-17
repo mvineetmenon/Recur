@@ -4,12 +4,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
+    # All variables come from `.env` (see .env.example); the values below are
+    # the defaults applied when a variable is absent. The container always
+    # listens on 0.0.0.0:8000; map the host port with RECUR_HTTP_PORT.
+    # Note: compose does not support nested ${VAR:-...} defaults, so the DB
+    # URL is built from DB_PASSWORD directly (see .env.example).
     ports:
       - "${RECUR_HTTP_PORT:-8000}:8000"
     environment:
       - DATABASE_URL=postgresql+psycopg2://recur:${DB_PASSWORD:-recur-dev-password}@postgres:5432/recur
-      - DEBUG=false
-      - LOG_LEVEL=INFO
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
     depends_on:
       postgres:

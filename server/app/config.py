@@ -6,8 +6,16 @@ FastAPI-based health check aggregator and status evaluator
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Base directory
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load .env-style configuration for standalone runs (in docker mode the
+# compose file passes explicit environment variables instead). Existing
+# environment variables always take precedence over .env values.
+load_dotenv(BASE_DIR.parent / ".env")  # repo root, independent of the CWD
+load_dotenv(Path.cwd() / ".env")  # current working directory (other layouts)
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
