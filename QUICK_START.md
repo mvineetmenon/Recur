@@ -38,11 +38,19 @@ server (JSON columns stored as JSONB).
 
 ## 2. Install an Agent
 
-On each machine you want to monitor:
+On each machine you want to monitor, either:
 
 ```bash
+# Option A: one-liner (downloads the agent files from the repository)
 curl -s https://raw.githubusercontent.com/mvineetmenon/Recur/main/agent/install.sh | sudo bash
 
+# Option B: from a local checkout (no download of agent files)
+git clone https://github.com/mvineetmenon/Recur.git && cd Recur && sudo ./agent/install.sh
+```
+
+Then:
+
+```bash
 # Edit the configuration
 sudo vim /etc/recur/config.yaml
 

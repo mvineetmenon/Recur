@@ -28,7 +28,9 @@ fi
 PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
 echo "Found Python $PYTHON_VERSION"
 
-if (( $(echo "$PYTHON_VERSION < 3.12" | bc -l) )); then
+# Version comparison in Python itself: avoids a `bc` dependency, which is
+# not part of the documented prerequisites.
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; then
     echo "ERROR: Python 3.12+ is required"
     exit 1
 fi

@@ -17,7 +17,12 @@ from typing import Any, Dict, Optional, Tuple
 try:
     import yaml
 except ImportError:
-    print("Error: PyYAML is required. Install with: pip install pyyaml", file=sys.stderr)
+    print(
+        "Error: PyYAML is required. Install it with your distro package "
+        "(e.g. 'apt install python3-yaml' or 'yum install python3-pyyaml') "
+        "or 'pip install pyyaml' inside a virtualenv.",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 

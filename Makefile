@@ -1,4 +1,4 @@
-.PHONY: help install dev-setup test lint format run run-docker clean
+.PHONY: help install dev-setup test lint format run run-docker install-agent install-agent-local clean
 
 help:
 	@echo "Recur - System Health Monitoring Platform"
@@ -11,7 +11,8 @@ help:
 	@echo "  make format       - Format code"
 	@echo "  make run          - Run development server"
 	@echo "  make run-docker   - Run with Docker Compose"
-	@echo "  make install-agent - Show agent install command"
+	@echo "  make install-agent       - Show the remote (curl) agent install command"
+	@echo "  make install-agent-local - Install agent from this checkout (sudo)"
 	@echo "  make clean        - Clean up build artifacts"
 
 install:
@@ -26,7 +27,7 @@ test:
 	@. venv/bin/activate && pytest -v --cov=server/app server/tests/
 
 lint:
-	@. venv/bin/activate && flake8 server/ && mypy server/
+	@. venv/bin/activate && black --check server/ && flake8 server/ && mypy server/
 
 format:
 	@. venv/bin/activate && black server/ && isort server/
@@ -40,9 +41,15 @@ run-docker:
 	@echo "Dashboard at http://localhost:8000/dashboard"
 
 install-agent:
-	@chmod +x agent/install.sh
-	@echo "To install agent on a remote machine, run:"
+	@echo "To install the agent on a remote machine, run there:"
 	@echo "  curl -s https://raw.githubusercontent.com/mvineetmenon/Recur/main/agent/install.sh | sudo bash"
+	@echo "(the installer downloads the companion agent files from the repository)"
+
+install-agent-local:
+	@chmod +x agent/install.sh
+	@echo "Installing agent from this checkout (companion files are taken from"
+	@echo "the local agent/ directory, so no download of agent files is needed)..."
+	@sudo ./agent/install.sh
 
 clean:
 	@find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

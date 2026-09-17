@@ -5,8 +5,14 @@
 # Common curl commands for interacting with the Recur server
 ################################################################################
 
-# Set the server URL
-SERVER="http://localhost:8000"
+# Set the server URL (override with RECUR_SERVER_URL, e.g. for a remote server)
+SERVER="${RECUR_SERVER_URL:-http://localhost:8000}"
+
+# jq is required to pretty-print the responses
+if ! command -v jq &> /dev/null; then
+    echo "ERROR: jq is required. Install it (e.g. 'apt install jq' or 'yum install jq')."
+    exit 1
+fi
 
 # Colors for output
 GREEN='\033[0;32m'

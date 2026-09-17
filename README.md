@@ -88,10 +88,28 @@ Notes:
 
 ### Agent (both options)
 
-```bash
-# On each remote machine you want to monitor from
-curl -s https://raw.githubusercontent.com/mvineetmenon/Recur/main/agent/install.sh | sudo bash
+On each machine you want to monitor, install the agent either way:
 
+**Option A: one-liner** (the installer downloads `recur-agent.sh`,
+`health_check_utils.py`, and `config.example.yaml` from the repository)
+
+```bash
+curl -s https://raw.githubusercontent.com/mvineetmenon/Recur/main/agent/install.sh | sudo bash
+```
+
+**Option B: from a local checkout** (clone the repo on the target machine;
+the installer finds the agent files next to the script and uses them as-is,
+so nothing is downloaded from the internet)
+
+```bash
+git clone https://github.com/mvineetmenon/Recur.git
+cd Recur
+sudo ./agent/install.sh    # or: make install-agent-local
+```
+
+Then finish the setup on that machine:
+
+```bash
 # Edit the configuration (installed example: /etc/recur/config.yaml)
 sudo vim /etc/recur/config.yaml
 
