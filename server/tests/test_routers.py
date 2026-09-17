@@ -315,6 +315,99 @@ class TestSystemRoutes:
         assert "tasks" in data
         assert "dependencies" in data
 
+    def test_system_forest_empty(self, client):
+        """Test forest endpoint with no systems returns empty roots"""
+        response = client.get("/api/v1/systems/forest")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["root_count"] == 0
+        assert data["roots"] == []
+
+    def test_system_forest_returns_roots_only_with_nested_tree(self, client):
+        """Test forest lists only root systems, with children nested inside"""
+        client.post(
+            "/api/v1/systems",
+            json=self._create_payload(
+                "forest-parent",
+                config={
+                    "name": "Parent",
+                    "tasks": [{"name": "p-task", "type": "http", "url": "http://x"}],
+                    "dependencies": [
+                        {
+                            "name": "Child",
+                            "tasks": [{"name": "c-task", "type": "tcp", "host": "x", "port": 1}],
+                        }
+                    ],
+                },
+            ),
+        )
+        # Independent second root
+        client.post("/api/v1/systems", json=self._create_payload("forest-other"))
+
+        response = client.get("/api/v1/systems/forest")
+        assert response.status_code == 200
+        data = response.json()
+
+        # Only roots at top level (child is nested, not a root)
+        assert data["root_count"] == 2
+        root_ids = {root["system_id"] for root in data["roots"]}
+        assert root_ids == {"forest-parent", "forest-other"}
+
+        parent = next(r for r in data["roots"] if r["system_id"] == "forest-parent")
+        assert len(parent["tasks"]) == 1
+        assert parent["tasks"][0]["task_id"] == "p-task"
+        assert len(parent["dependencies"]) == 1
+        child = parent["dependencies"][0]
+        assert child["system_id"] == "forest-parent/child"
+        assert child["name"] == "Child"
+        assert len(child["dependencies"]) == 0
+        assert child["tasks"][0]["task_id"] == "c-task"
+
+    def test_system_forest_shared_dependency(self, client, test_db):
+        """Test a child shared by several parents renders once per path (diamond)"""
+        from server.app.models import System, SystemDependency, Task
+
+        a = System(system_id="dia-a", name="A", config={"name": "A", "tasks": []})
+        b = System(system_id="dia-b", name="B", config={"name": "B", "tasks": []})
+        c = System(system_id="dia-c", name="C", config={"name": "C", "tasks": []})
+        d = System(system_id="dia-d", name="D", config={"name": "D", "tasks": []})
+        test_db.add_all([a, b, c, d])
+        test_db.flush()
+
+        test_db.add(
+            Task(
+                task_id="dia-d-task",
+                system_id=d.id,
+                name="d-task",
+                task_type="tcp",
+                config={"host": "x", "port": 1},
+            )
+        )
+        for parent, child in ((a, b), (a, c), (b, d), (c, d)):
+            test_db.add(
+                SystemDependency(
+                    parent_system_id=parent.id,
+                    child_system_id=child.id,
+                    criticality="HIGH",
+                )
+            )
+        test_db.commit()
+
+        response = client.get("/api/v1/systems/forest")
+        assert response.status_code == 200
+        data = response.json()
+
+        # Only A is a root; the shared child D appears under both B and C
+        assert data["root_count"] == 1
+        root = data["roots"][0]
+        assert root["system_id"] == "dia-a"
+        assert [dep["system_id"] for dep in root["dependencies"]] == ["dia-b", "dia-c"]
+        for dep in root["dependencies"]:
+            shared = dep["dependencies"]
+            assert [x["system_id"] for x in shared] == ["dia-d"]
+            assert shared[0]["tasks"][0]["task_id"] == "dia-d-task"
+
     def test_get_system_health(self, client):
         """Test getting system health summary"""
         client.post("/api/v1/systems", json=self._create_payload("test-system-health"))
@@ -583,8 +676,11 @@ class TestDashboardRoutes:
         assert "/dashboard" in response.text
 
     def test_dashboard_page(self, client):
-        """Test dashboard page renders from template"""
+        """Test dashboard page renders the dependency tree view"""
         response = client.get("/dashboard")
         assert response.status_code == 200
         assert "Recur" in response.text
-        assert "loadSystems" in response.text
+        # The page renders the topology as a semantic tree from the forest API
+        assert "loadForest" in response.text
+        assert "/api/v1/systems/forest" in response.text
+        assert 'role="tree"' in response.text

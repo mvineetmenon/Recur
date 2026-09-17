@@ -95,6 +95,20 @@ class SystemTreeResponse(BaseModel):
         from_attributes = True
 
 
+class SystemForestResponse(BaseModel):
+    """All systems rendered as a forest of dependency trees
+
+    Only root systems (those that no other system depends on) appear at the
+    top level; their dependencies are nested recursively.
+
+    ``root_count`` is the number of top-level roots, NOT the total number of
+    systems in the forest (unlike ``total`` in ``SystemListResponse``).
+    """
+
+    root_count: int
+    roots: List[SystemTreeResponse] = []
+
+
 class SystemResponse(BaseModel):
     """System information response"""
 

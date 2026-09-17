@@ -41,37 +41,13 @@
             font-size: 14px;
         }
 
-        .systems-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-        }
-
-        .system-card {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-            transition: transform 0.2s;
-        }
-
-        .system-card:hover {
-            transform: translateY(-5px);
-        }
-
-        .system-name {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-
         .status-badge {
             display: inline-block;
-            padding: 6px 12px;
+            padding: 3px 10px;
             border-radius: 20px;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 600;
-            margin-bottom: 10px;
+            white-space: nowrap;
         }
 
         .status-up {
@@ -81,6 +57,11 @@
 
         .status-down {
             background: #ef4444;
+            color: white;
+        }
+
+        .status-degraded {
+            background: #f59e0b;
             color: white;
         }
 
@@ -113,6 +94,7 @@
             margin-top: 20px;
             border-left: 4px solid #0369a1;
             font-size: 14px;
+            line-height: 1.8;
         }
 
         code {
@@ -120,6 +102,195 @@
             padding: 2px 6px;
             border-radius: 3px;
             font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        /* ================= Tree panel ================= */
+
+        .tree-panel {
+            background: white;
+            border-radius: 10px;
+            padding: 20px 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .tree-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+
+        .tree-legend {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .tree-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .tree-actions button {
+            border: 1px solid #d1d5db;
+            background: #f9fafb;
+            color: #374151;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .tree-actions button:hover {
+            background: #f3f4f6;
+        }
+
+        .tree-summary {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 12px;
+            min-height: 14px;
+        }
+
+        /* ================= Semantic tree ================= */
+
+        .tree,
+        .tree ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Child groups get the vertical guide line */
+        .tree .children {
+            margin-left: 12px;
+            padding-left: 24px;
+            border-left: 1px solid #cbd5e1;
+        }
+
+        .tree .node {
+            position: relative;
+            padding: 5px 0;
+        }
+
+        .tree .children > .node {
+            padding-left: 24px;
+        }
+
+        /* Horizontal connector glyphs (├─ / └─) */
+        .tree .children > .node::before {
+            content: "\251c\2500";
+            position: absolute;
+            left: -24px;
+            top: 10px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 13px;
+            line-height: 1;
+            color: #94a3b8;
+        }
+
+        .tree .children > .node:last-child::before {
+            content: "\2514\2500";
+        }
+
+        /* Trim the vertical guide line below the last child's connector */
+        .tree .children > .node:last-child::after {
+            content: "";
+            position: absolute;
+            left: -24px;
+            top: 18px;
+            bottom: 0;
+            width: 1px;
+            background: #ffffff;
+        }
+
+        .tree details {
+            display: block;
+        }
+
+        .tree summary {
+            cursor: pointer;
+            list-style: none;
+            border-radius: 6px;
+            padding: 2px 8px 2px 4px;
+            outline-offset: 2px;
+        }
+
+        .tree summary:hover {
+            background: #f8fafc;
+        }
+
+        .tree summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .tree .row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            min-height: 26px;
+        }
+
+        .tree .name {
+            font-weight: 600;
+            color: #111827;
+            font-size: 14px;
+        }
+
+        .tree .sid {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 11px;
+            color: #9ca3af;
+        }
+
+        .tree .meta {
+            color: #9ca3af;
+            font-size: 12px;
+        }
+
+        .tree .node-task .name {
+            font-weight: 500;
+            color: #374151;
+            font-size: 13px;
+        }
+
+        .tree .chip {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #e0e7ff;
+            color: #3730a3;
+            white-space: nowrap;
+        }
+
+        .tree .chip-tcp { background: #cffafe; color: #155e75; }
+        .tree .chip-command { background: #ffedd5; color: #9a3412; }
+        .tree .chip-ping { background: #dcfce7; color: #166534; }
+        .tree .chip-script { background: #f3e8ff; color: #6b21a8; }
+        .tree .chip-https { background: #e0e7ff; color: #3730a3; }
+
+        .tree .node-error {
+            color: #dc2626;
+            font-size: 12px;
+            margin: 4px 4px 0;
+            max-width: 70ch;
+            word-break: break-word;
         }
     </style>
 </head>
@@ -133,56 +304,267 @@
         <div class="api-info">
             <strong>📡 API Available:</strong><br>
             <code>GET /api/v1/systems</code> - List all systems<br>
+            <code>GET /api/v1/systems/forest</code> - Full dependency tree (all roots)<br>
+            <code>GET /api/v1/systems/{id}/tree</code> - Dependency tree for one system<br>
             <code>POST /api/v1/status</code> - Submit status report<br>
             <code>GET /api/v1/agents</code> - List agents
         </div>
 
-        <div class="systems-grid" id="systems-container">
-            <div class="loading">Loading systems...</div>
-        </div>
+        <section class="tree-panel" aria-label="System topology">
+            <div class="tree-toolbar">
+                <div class="tree-legend" aria-label="Status legend">
+                    <span class="legend-item"><span class="status-badge status-up">UP</span> healthy</span>
+                    <span class="legend-item"><span class="status-badge status-degraded">DEGRADED</span> partial</span>
+                    <span class="legend-item"><span class="status-badge status-down">DOWN</span> failing</span>
+                    <span class="legend-item"><span class="status-badge status-unknown">UNKNOWN</span> no data</span>
+                    <span class="legend-item">folder = system / resource</span>
+                    <span class="legend-item">chip = health check</span>
+                </div>
+                <div class="tree-actions">
+                    <button id="expand-all" type="button">Expand all</button>
+                    <button id="collapse-all" type="button">Collapse all</button>
+                </div>
+            </div>
+            <p class="tree-summary" id="tree-summary"></p>
+            <nav id="tree-container" aria-label="System dependency tree">
+                <div class="loading">Loading systems...</div>
+            </nav>
+        </section>
     </div>
 
     <script>
-        async function loadSystems() {
+        const REFRESH_MS = 10000;
+        let lastPayload = null;
+        let requestSeq = 0;
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, ch => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[ch]));
+        }
+
+        function statusBadge(status) {
+            const s = String(status || 'UNKNOWN').toUpperCase();
+            const cls = s.toLowerCase();
+            const label = s === 'UP' ? '✓ UP' : s === 'DOWN' ? '✗ DOWN' : s;
+            return `<span class="status-badge status-${cls}">${label}</span>`;
+        }
+
+        function formatDuration(ms) {
+            return ms == null ? '—' : `${Math.round(ms)} ms`;
+        }
+
+        function formatTime(ts) {
+            return ts ? new Date(ts).toLocaleString() : 'Never';
+        }
+
+        function taskNode(task) {
+            const error = task.error_message
+                ? `<p class="node-error">${escapeHtml(task.error_message)}</p>`
+                : '';
+            return `
+                    <li class="node node-task" role="treeitem">
+                        <div class="row">
+                            <span class="chip chip-${escapeHtml(task.task_type)}">${escapeHtml(task.task_type)}</span>
+                            <span class="name" title="${escapeHtml(task.task_id)}">${escapeHtml(task.name)}</span>
+                            ${statusBadge(task.status)}
+                            <span class="meta">${formatDuration(task.duration_ms)}</span>
+                        </div>
+                        ${error}
+                    </li>`;
+        }
+
+        function systemNode(system) {
+            const tasks = system.tasks || [];
+            const deps = system.dependencies || [];
+            const children = [
+                ...tasks.map(taskNode),
+                ...deps.map(systemNode),
+            ];
+            const taskLabel = tasks.length === 1 ? '1 check' : `${tasks.length} checks`;
+            const depLabel = deps.length === 1 ? '1 dependency' : `${deps.length} dependencies`;
+            const childUl = children.length
+                ? `<ul class="children" role="group">${children.join('')}</ul>`
+                : '';
+            const error = system.last_error
+                ? `<p class="node-error">${escapeHtml(system.last_error)}</p>`
+                : '';
+            return `
+                    <li class="node node-system" role="treeitem" data-path="${escapeHtml(system.__path)}">
+                        <details open data-path="${escapeHtml(system.__path)}">
+                            <summary>
+                                <div class="row">
+                                    ${statusBadge(system.status)}
+                                    <span class="name">${escapeHtml(system.name)}</span>
+                                    <span class="sid" title="${escapeHtml(system.system_id)}">${escapeHtml(system.system_id)}</span>
+                                    <span class="meta">${taskLabel} · ${depLabel}</span>
+                                    <span class="meta">last check: ${formatTime(system.last_check_time)}</span>
+                                </div>
+                            </summary>
+                            ${childUl}
+                        </details>
+                        ${error}
+                    </li>`;
+        }
+
+        // Count distinct systems and their checks (a system shared by several
+        // parents appears in multiple tree positions but counts once)
+        function countNodes(roots) {
+            let systems = 0;
+            let checks = 0;
+            const seen = new Set();
+            const walk = s => {
+                if (seen.has(s.system_id)) return;
+                seen.add(s.system_id);
+                systems += 1;
+                checks += (s.tasks || []).length;
+                (s.dependencies || []).forEach(walk);
+            };
+            roots.forEach(walk);
+            return { systems, checks };
+        }
+
+        // Compact signature of only the fields the tree renders (no output_data
+        // blobs), used to skip re-renders when nothing visible changed
+        function payloadSignature(roots) {
+            let sig = '';
+            const walk = s => {
+                sig += `${s.system_id}|${s.name}|${s.status}|${s.last_check_time}|${s.last_error}|`;
+                (s.tasks || []).forEach(t => {
+                    sig += `${t.task_id}|${t.name}|${t.task_type}|${t.status}|${t.duration_ms}|${t.error_message}|`;
+                });
+                (s.dependencies || []).forEach(walk);
+            };
+            roots.forEach(walk);
+            return sig;
+        }
+
+        // Assign a stable positional path to every system node so expand/collapse
+        // state survives re-renders (the same system can appear in several places).
+        function assignPaths(roots) {
+            const walk = (deps, prefix) => {
+                deps.forEach((d, i) => {
+                    d.__path = `${prefix}${i}`;
+                    walk(d.dependencies || [], `${d.__path}/`);
+                });
+            };
+            walk(roots, '');
+        }
+
+        function collectExpanded(container) {
+            const state = new Map();
+            const walk = ul => {
+                for (const li of ul.querySelectorAll(':scope > li.node-system')) {
+                    const details = li.querySelector(':scope > details');
+                    if (!details) continue;
+                    state.set(li.dataset.path, details.open);
+                    const childUl = details.querySelector(':scope > ul.children');
+                    if (childUl) walk(childUl);
+                }
+            };
+            const rootUl = container.querySelector('ul.tree');
+            if (rootUl) walk(rootUl);
+            return state;
+        }
+
+        function applyExpanded(container, state) {
+            container.querySelectorAll('details[data-path]').forEach(details => {
+                const wanted = state.get(details.dataset.path);
+                if (wanted !== undefined) details.open = wanted;
+            });
+        }
+
+        function setAllExpanded(open) {
+            const container = document.getElementById('tree-container');
+            container.querySelectorAll('details').forEach(d => { d.open = open; });
+        }
+
+        function syncAria() {
+            document.querySelectorAll('#tree-container li.node-system').forEach(li => {
+                const details = li.querySelector(':scope > details');
+                if (details) li.setAttribute('aria-expanded', String(details.open));
+            });
+        }
+
+        async function loadForest() {
+            const seq = ++requestSeq;
+            const container = document.getElementById('tree-container');
+            const summaryLine = document.getElementById('tree-summary');
             try {
-                const response = await fetch('/api/v1/systems?limit=100');
+                const response = await fetch('/api/v1/systems/forest');
                 const data = await response.json();
+                if (seq !== requestSeq) return; // a newer refresh superseded this one
+                if (!response.ok) {
+                    throw new Error(data.detail || response.statusText);
+                }
 
-                const container = document.getElementById('systems-container');
+                const roots = data.roots || [];
+                const signature = payloadSignature(roots);
 
-                if (data.systems.length === 0) {
-                    container.innerHTML = '<div class="loading">No systems registered yet.<br>Use the API to register systems.</div>';
+                if (roots.length === 0) {
+                    if (lastPayload !== 'empty') {
+                        container.innerHTML =
+                            '<div class="loading">No systems registered yet.<br>Use the API to register systems.</div>';
+                        summaryLine.textContent = '';
+                    }
+                    lastPayload = 'empty';
                     return;
                 }
 
-                container.innerHTML = data.systems.map(system => `
-                    <div class="system-card">
-                        <div class="system-name">${system.name}</div>
-                        <div>
-                            <span class="status-badge status-${system.status.toLowerCase()}">
-                                ${system.status === 'UP' ? '✓' : '✗'} ${system.status}
-                            </span>
-                        </div>
-                        ${system.description ? `<p style="color: #666; font-size: 14px; margin-top: 10px;">${system.description}</p>` : ''}
-                        <p style="color: #999; font-size: 12px; margin-top: 10px;">
-                            Last check: ${system.last_check_time ? new Date(system.last_check_time).toLocaleString() : 'Never'}
-                        </p>
-                    </div>
-                `).join('');
+                // Rendered fields unchanged: keep the current tree and its UI state
+                if (signature === lastPayload) return;
+
+                const prevExpanded = collectExpanded(container);
+                assignPaths(roots);
+                container.innerHTML =
+                    `<ul class="tree" role="tree">${roots.map(systemNode).join('')}</ul>`;
+                applyExpanded(container, prevExpanded);
+                syncAria();
+
+                const { systems, checks } = countNodes(roots);
+                summaryLine.textContent =
+                    `${systems} system${systems === 1 ? '' : 's'} · ` +
+                    `${checks} health check${checks === 1 ? '' : 's'} · ` +
+                    `${data.root_count} root${data.root_count === 1 ? '' : 's'}`;
+                lastPayload = signature;
             } catch (error) {
-                document.getElementById('systems-container').innerHTML = `
+                if (seq !== requestSeq) return;
+                // Force a re-render on the next successful response so a
+                // transient error never leaves the dashboard stuck on the box
+                lastPayload = null;
+                container.innerHTML = `
                     <div class="error">
-                        <strong>Error loading systems:</strong><br>${error.message}
+                        <strong>Error loading systems:</strong><br>${escapeHtml(error.message)}
                     </div>
                 `;
             }
         }
 
-        // Load systems on page load
-        loadSystems();
+        // Expand / collapse all
+        document.getElementById('expand-all').addEventListener('click', () => {
+            setAllExpanded(true);
+            syncAria();
+        });
+        document.getElementById('collapse-all').addEventListener('click', () => {
+            setAllExpanded(false);
+            syncAria();
+        });
 
-        // Refresh every 10 seconds
-        setInterval(loadSystems, 10000);
+        // Keep aria-expanded in sync with native <details> toggles
+        document.getElementById('tree-container').addEventListener('toggle', e => {
+            if (e.target.matches('details')) syncAria();
+        }, true);
+
+        // Load on page load, then refresh every 10 seconds (paused while the
+        // tab is hidden so background tabs do not add server load)
+        loadForest();
+        setInterval(() => {
+            if (!document.hidden) loadForest();
+        }, REFRESH_MS);
     </script>
 </body>
 </html>

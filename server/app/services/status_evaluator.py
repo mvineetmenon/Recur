@@ -2,11 +2,12 @@
 Service for evaluating system health status recursively
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..models import HealthStatus, System, Task, TaskResult
+from ..models import HealthStatus, System, SystemDependency, Task, TaskResult
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -89,24 +90,28 @@ class StatusEvaluator:
         """
         Fetch the most recent TaskResult for each task in a single query.
 
+        Only the newest row per task (max id) is fetched, so query cost stays
+        flat no matter how much result history has accumulated.
+
         Returns a mapping of task primary key -> latest result.
         """
         if not tasks:
             return {}
 
         task_ids = [task.id for task in tasks]
+        latest_ids = (
+            db.query(func.max(TaskResult.id).label("latest_id"))
+            .filter(TaskResult.task_id.in_(task_ids))
+            .group_by(TaskResult.task_id)
+            .subquery()
+        )
         results = (
             db.query(TaskResult)
-            .filter(TaskResult.task_id.in_(task_ids))
-            .order_by(TaskResult.created_at.desc(), TaskResult.id.desc())
+            .join(latest_ids, TaskResult.id == latest_ids.c.latest_id)
             .all()
         )
 
-        latest: Dict[int, TaskResult] = {}
-        for result in results:
-            if result.task_id not in latest:
-                latest[result.task_id] = result
-        return latest
+        return {result.task_id: result for result in results}
 
     @staticmethod
     def _get_dependency_statuses(system: System, db: Session, _seen: set) -> List[HealthStatus]:
@@ -161,6 +166,29 @@ class StatusEvaluator:
             seen.discard(system.id)
 
     @staticmethod
+    def _task_dict(task: Task, result: Optional[TaskResult]) -> Dict[str, Any]:
+        """Build one task entry for tree payloads (latest result, or UNKNOWN)"""
+        if result:
+            return {
+                "task_id": task.task_id,
+                "name": task.name,
+                "task_type": task.task_type,
+                "status": result.status,
+                "duration_ms": result.duration_ms,
+                "error_message": result.error_message,
+                "output_data": result.output_data,
+            }
+        return {
+            "task_id": task.task_id,
+            "name": task.name,
+            "task_type": task.task_type,
+            "status": HealthStatus.UNKNOWN,
+            "duration_ms": None,
+            "error_message": None,
+            "output_data": None,
+        }
+
+    @staticmethod
     def _build_tree(system: System, db: Session, seen: set) -> Dict[str, Any]:
         """Assemble one level of the system tree (recursion stack in `seen`)"""
         tree: Dict[str, Any] = {
@@ -174,34 +202,10 @@ class StatusEvaluator:
             "dependencies": [],
         }
 
-        # Add task results (one query for the whole level)
+        # Add task results (one bounded query for the whole level)
         latest = StatusEvaluator._latest_results_for_tasks(system.tasks, db)
         for task in system.tasks:
-            result = latest.get(task.id)
-            if result:
-                tree["tasks"].append(
-                    {
-                        "task_id": task.task_id,
-                        "name": task.name,
-                        "task_type": task.task_type,
-                        "status": result.status,
-                        "duration_ms": result.duration_ms,
-                        "error_message": result.error_message,
-                        "output_data": result.output_data,
-                    }
-                )
-            else:
-                tree["tasks"].append(
-                    {
-                        "task_id": task.task_id,
-                        "name": task.name,
-                        "task_type": task.task_type,
-                        "status": HealthStatus.UNKNOWN,
-                        "duration_ms": None,
-                        "error_message": None,
-                        "output_data": None,
-                    }
-                )
+            tree["tasks"].append(StatusEvaluator._task_dict(task, latest.get(task.id)))
 
         # Recursively add dependencies
         for dep in system.dependencies:
@@ -210,6 +214,73 @@ class StatusEvaluator:
                 tree["dependencies"].append(dep_tree)
 
         return tree
+
+    @staticmethod
+    def get_system_forest(roots: List[System], db: Session) -> List[Dict[str, Any]]:
+        """
+        Build the forest of dependency trees for the given root systems.
+
+        Bulk-loads all systems, dependency edges, tasks, and the latest task
+        result per task (a constant number of queries, independent of
+        topology size), then assembles the nested trees in Python. A system
+        shared by several parents is built once and referenced at every
+        position; dependency cycles are cut with an empty stub.
+        """
+        systems: Dict[int, System] = {system.id: system for system in db.query(System).all()}
+
+        children_of: Dict[int, List[int]] = {}
+        for edge in db.query(SystemDependency).order_by(SystemDependency.id).all():
+            children_of.setdefault(edge.parent_system_id, []).append(edge.child_system_id)
+
+        tasks_by_system: Dict[int, List[Task]] = {}
+        for task in db.query(Task).order_by(Task.id).all():
+            tasks_by_system.setdefault(task.system_id, []).append(task)
+
+        all_tasks = [task for tasks in tasks_by_system.values() for task in tasks]
+        latest = StatusEvaluator._latest_results_for_tasks(all_tasks, db)
+
+        memo: Dict[int, Dict[str, Any]] = {}
+        in_progress: set = set()
+
+        def build(system: System) -> Dict[str, Any]:
+            if system.id in memo:
+                return memo[system.id]
+            if system.id in in_progress:
+                # Cycle guard: stop instead of recursing forever
+                logger.warning(f"Dependency cycle detected at {system.system_id}")
+                return {
+                    "system_id": system.system_id,
+                    "name": system.name,
+                    "description": system.description,
+                    "status": system.status,
+                    "last_check_time": system.last_check_time,
+                    "last_error": system.last_error,
+                    "tasks": [],
+                    "dependencies": [],
+                }
+            in_progress.add(system.id)
+            node: Dict[str, Any] = {
+                "system_id": system.system_id,
+                "name": system.name,
+                "description": system.description,
+                "status": system.status,
+                "last_check_time": system.last_check_time,
+                "last_error": system.last_error,
+                "tasks": [
+                    StatusEvaluator._task_dict(task, latest.get(task.id))
+                    for task in tasks_by_system.get(system.id, [])
+                ],
+                "dependencies": [
+                    build(systems[child_id])
+                    for child_id in children_of.get(system.id, [])
+                    if child_id in systems
+                ],
+            }
+            in_progress.discard(system.id)
+            memo[system.id] = node
+            return node
+
+        return [build(root) for root in roots]
 
     @staticmethod
     def get_system_health_summary(system: System, db: Session) -> Dict[str, Any]:

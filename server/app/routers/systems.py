@@ -5,12 +5,15 @@ System management endpoints
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import config
 from ..database import get_db
+from ..models import System, SystemDependency
 from ..schemas import (
     SystemCreateRequest,
+    SystemForestResponse,
     SystemListResponse,
     SystemResponse,
     SystemTreeResponse,
@@ -114,6 +117,36 @@ async def list_systems(
     return SystemListResponse(
         total=total,
         systems=[SystemResponse.model_validate(s) for s in systems],
+    )
+
+
+@router.get("/systems/forest", response_model=SystemForestResponse)
+async def list_system_forest(
+    db: Annotated[Session, Depends(get_db)],
+):
+    """
+    Get all systems as a forest of dependency trees
+
+    Returns only root systems (systems that no other system depends on),
+    each with its full nested tree of tasks and dependencies. This is the
+    hierarchical view of the whole monitoring topology.
+
+    NOTE: must stay above the ``/systems/{system_id}`` route so the literal
+    path "forest" is not captured as a system id.
+    """
+    child_ids = select(SystemDependency.child_system_id)
+    roots = (
+        db.query(System)
+        .filter(~System.id.in_(child_ids))
+        .order_by(System.name)
+        .all()
+    )
+
+    trees = StatusEvaluator.get_system_forest(roots, db)
+
+    return SystemForestResponse(
+        root_count=len(trees),
+        roots=[SystemTreeResponse(**tree) for tree in trees],
     )
 
 
