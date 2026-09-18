@@ -106,9 +106,7 @@ class StatusEvaluator:
             .subquery()
         )
         results = (
-            db.query(TaskResult)
-            .join(latest_ids, TaskResult.id == latest_ids.c.latest_id)
-            .all()
+            db.query(TaskResult).join(latest_ids, TaskResult.id == latest_ids.c.latest_id).all()
         )
 
         return {result.task_id: result for result in results}

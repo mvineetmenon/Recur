@@ -4,12 +4,15 @@
 # Recur Agent Installation Script
 # Installs the Recur health check agent on a system
 #
+# Runtime requirement: python3 only. PyYAML is vendored (agent/vendor/), so
+# no pip or OS package access is needed on air-gapped hosts.
+#
 # Works in both modes:
 #   - Local: run from a repository checkout (agent files sit next to this
 #     script and are installed as-is)
 #   - Remote: curl -s <raw URL>/agent/install.sh | sudo bash
 #     (the script is read from stdin, so the companion files are downloaded
-#     from the repository)
+#     from the repository; curl or wget is used for that download)
 ################################################################################
 
 set -euo pipefail
@@ -29,7 +32,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" && pwd)"
 RECUR_REPO_BASE="${RECUR_REPO_BASE_URL:-https://raw.githubusercontent.com/mvineetmenon/Recur/main}"
 
 # Companion files required from the agent/ directory
-AGENT_FILES=("recur-agent.sh" "health_check_utils.py" "config.example.yaml")
+AGENT_FILES=("recur_agent.py" "health_check_utils.py" "_bootstrap.py" "config.example.yaml")
+
+# Vendored PyYAML (pure Python, MIT licensed) — the agent's only
+# non-stdlib dependency, bundled so pip/OS repos are not required.
+VENDOR_FILES=(
+    "yaml/__init__.py" "yaml/composer.py" "yaml/constructor.py" "yaml/cyaml.py"
+    "yaml/dumper.py" "yaml/emitter.py" "yaml/error.py" "yaml/events.py"
+    "yaml/loader.py" "yaml/nodes.py" "yaml/parser.py" "yaml/reader.py"
+    "yaml/representer.py" "yaml/resolver.py" "yaml/scanner.py"
+    "yaml/serializer.py" "yaml/tokens.py" "LICENSE"
+)
 
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
@@ -37,20 +50,25 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# Install dependencies
-# PyYAML comes from the distro package: `pip3 install` fails on PEP 668
-# systems (e.g. Ubuntu 24.04) where the system Python is externally managed.
+# Check dependencies: python3 is the only runtime requirement.
 echo ""
-echo "[1/5] Installing dependencies..."
-if command -v apt-get &> /dev/null; then
-    apt-get update -qq
-    apt-get install -y -qq curl python3 python3-yaml
-elif command -v yum &> /dev/null; then
-    yum install -y -q curl python3 python3-pyyaml
-else
-    echo "ERROR: Unsupported package manager"
+echo "[1/5] Checking dependencies..."
+if ! command -v python3 &> /dev/null; then
+    echo "python3 not found; attempting installation..."
+    if command -v apt-get &> /dev/null; then
+        apt-get update -qq
+        apt-get install -y -qq python3
+    elif command -v yum &> /dev/null; then
+        yum install -y -q python3
+    elif command -v dnf &> /dev/null; then
+        dnf install -y -q python3
+    fi
+fi
+if ! command -v python3 &> /dev/null; then
+    echo "ERROR: python3 is required but could not be installed"
     exit 1
 fi
+echo "python3: $(python3 --version 2>&1)"
 
 # Create directories
 echo "[2/5] Creating directories..."
@@ -61,11 +79,13 @@ chmod 755 /etc/recur /var/lib/recur /var/log/recur
 
 # Resolve where the companion agent files come from: this script's directory
 # when running from a checkout, otherwise a temp dir populated from the repo.
-# curl is guaranteed by step [1/5], so this runs after it.
 resolve_agent_sources() {
     local f missing=()
     for f in "${AGENT_FILES[@]}"; do
         [[ -f "$SCRIPT_DIR/$f" ]] || missing+=("$f")
+    done
+    for f in "${VENDOR_FILES[@]}"; do
+        [[ -f "$SCRIPT_DIR/vendor/$f" ]] || missing+=("vendor/$f")
     done
 
     if (( ${#missing[@]} == 0 )); then
@@ -73,22 +93,46 @@ resolve_agent_sources() {
         return 0
     fi
 
+    # A downloader is needed for the piped-install path.
+    if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+        if command -v apt-get &> /dev/null; then
+            apt-get install -y -qq curl
+        elif command -v yum &> /dev/null; then
+            yum install -y -q curl
+        elif command -v dnf &> /dev/null; then
+            dnf install -y -q curl
+        fi
+    fi
+    if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+        echo "ERROR: curl or wget is required to download the agent files"
+        exit 1
+    fi
+
     AGENT_SRC_DIR="$(mktemp -d)"
     trap 'rm -rf "$AGENT_SRC_DIR"' EXIT
     for f in "${missing[@]}"; do
         echo "Downloading agent/$f from the repository..."
-        curl -fsSL --retry 3 "$RECUR_REPO_BASE/agent/$f" -o "$AGENT_SRC_DIR/$f"
+        if command -v curl &> /dev/null; then
+            curl -fsSL --retry 3 "$RECUR_REPO_BASE/agent/$f" -o "$AGENT_SRC_DIR/$f"
+        else
+            wget -q -O "$AGENT_SRC_DIR/$f" "$RECUR_REPO_BASE/agent/$f"
+        fi
     done
 }
 
-# Install agent scripts (lib dir keeps the python helper next to the agent;
-# /usr/local/bin holds symlinks so the agent works from any PATH location)
+# Install agent scripts (lib dir keeps the python files + vendored yaml next
+# to the agent; /usr/local/bin holds symlinks so the agent works from any
+# PATH location)
 echo "[3/5] Installing agent scripts..."
 resolve_agent_sources
 mkdir -p /usr/local/lib/recur
-install -m 755 "$AGENT_SRC_DIR/recur-agent.sh" /usr/local/lib/recur/recur-agent.sh
+install -m 755 "$AGENT_SRC_DIR/recur_agent.py" /usr/local/lib/recur/recur_agent.py
 install -m 755 "$AGENT_SRC_DIR/health_check_utils.py" /usr/local/lib/recur/health_check_utils.py
-ln -sf /usr/local/lib/recur/recur-agent.sh /usr/local/bin/recur-agent
+install -m 644 "$AGENT_SRC_DIR/_bootstrap.py" /usr/local/lib/recur/_bootstrap.py
+mkdir -p /usr/local/lib/recur/vendor
+cp -r "$AGENT_SRC_DIR/vendor/." /usr/local/lib/recur/vendor/
+chmod -R a+rX /usr/local/lib/recur/vendor
+ln -sf /usr/local/lib/recur/recur_agent.py /usr/local/bin/recur-agent
 ln -sf /usr/local/lib/recur/health_check_utils.py /usr/local/bin/recur-health-check
 
 # Install example configuration

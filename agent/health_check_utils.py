@@ -1,29 +1,51 @@
 #!/usr/bin/env python3
 """
 Recur Agent Health Check Utilities
-Python helper for agent to handle YAML parsing and health checks
+Python check executor for the Recur agent.
+
+Uses only the Python standard library (urllib, socket, subprocess) plus
+PyYAML for config parsing. PyYAML is resolved via _bootstrap, which falls
+back to the pure-Python copy vendored in agent/vendor/ when the system
+Python does not provide it (air-gapped hosts: python3 is the only
+requirement).
 """
 
 from __future__ import annotations
 
 import json
+import os
+import socket
+import ssl
 import subprocess
 import sys
 import time
-from datetime import datetime
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-try:
-    import yaml
-except ImportError:
-    print(
-        "Error: PyYAML is required. Install it with your distro package "
-        "(e.g. 'apt install python3-yaml' or 'yum install python3-pyyaml') "
-        "or 'pip install pyyaml' inside a virtualenv.",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+from _bootstrap import ensure_yaml
+
+yaml = ensure_yaml()
+
+
+def _request_status(url: str, timeout: float) -> int:
+    """GET ``url`` and return the HTTP status code.
+
+    Raises ``OSError`` (including ``URLError`` and socket timeouts) on
+    connection failure.
+    """
+    context = ssl.create_default_context() if url.lower().startswith("https://") else None
+    request = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+        return response.status
+
+
+def _tcp_connect(host: str, port: int, timeout: float) -> None:
+    """Open a TCP connection to ``host:port``; raises ``OSError`` on failure."""
+    with socket.create_connection((host, port), timeout=timeout):
+        return
 
 
 class HealthCheckAgent:
@@ -32,9 +54,9 @@ class HealthCheckAgent:
     def __init__(self, config_file: str, agent_id: Optional[str] = None):
         """Initialize agent with configuration"""
         self.config_file = Path(config_file)
-        self.agent_id = agent_id or subprocess.check_output(["hostname"], text=True).strip()
+        self.agent_id = agent_id or socket.gethostname()
         self.config = self._load_config()
-        self.timestamp = datetime.utcnow().isoformat() + "Z"
+        self.timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def _load_config(self) -> Dict[str, Any]:
         """Load and parse YAML configuration"""
@@ -156,7 +178,7 @@ class HealthCheckAgent:
         }
 
     def _check_http(self, task: Dict[str, Any], timeout: float) -> Tuple[str, str]:
-        """HTTP/HTTPS health check"""
+        """HTTP/HTTPS health check (stdlib urllib; no curl required)"""
         url = task.get("url")
         expected_status = task.get("expected_status", 200)
 
@@ -164,37 +186,24 @@ class HealthCheckAgent:
             return "DOWN", "Missing 'url' parameter"
 
         try:
-            result = subprocess.run(
-                [
-                    "curl",
-                    "-s",
-                    "-o",
-                    "/dev/null",
-                    "-w",
-                    "%{http_code}",
-                    "--max-time",
-                    str(timeout),
-                    "--connect-timeout",
-                    "3",
-                    url,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=timeout + 1,
-            )
-
-            http_code = int(result.stdout.strip())
+            http_code = _request_status(url, timeout)
 
             if http_code == expected_status:
                 return "UP", ""
             else:
                 return "DOWN", f"HTTP {http_code} (expected {expected_status})"
 
-        except (subprocess.TimeoutExpired, ValueError) as e:
-            return "DOWN", f"Request failed: {e}"
+        except urllib.error.HTTPError as e:
+            # HTTP errors carry a status code: compare against expectation
+            if e.code == expected_status:
+                return "UP", ""
+            return "DOWN", f"HTTP {e.code} (expected {expected_status})"
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            reason = getattr(e, "reason", None) or e
+            return "DOWN", f"Request failed: {reason}"
 
     def _check_tcp(self, task: Dict[str, Any], timeout: float) -> Tuple[str, str]:
-        """TCP port check"""
+        """TCP port check (stdlib socket; no bash /dev/tcp required)"""
         host = task.get("host")
         port = task.get("port")
 
@@ -202,23 +211,16 @@ class HealthCheckAgent:
             return "DOWN", "Missing 'host' or 'port' parameter"
 
         try:
-            result = subprocess.run(
-                ["bash", "-c", f"timeout {timeout} bash -c 'echo >/dev/tcp/{host}/{port}'"],
-                capture_output=True,
-                text=True,
-                timeout=timeout + 1,
-            )
-
-            if result.returncode == 0:
-                return "UP", ""
-            else:
-                return "DOWN", f"Connection failed to {host}:{port}"
-
-        except subprocess.TimeoutExpired:
-            return "DOWN", f"Connection timeout to {host}:{port}"
+            _tcp_connect(host, int(port), timeout)
+            return "UP", ""
+        except (OSError, ValueError) as e:
+            detail = getattr(e, "reason", None) or e
+            if isinstance(e, socket.timeout) or "timed out" in str(detail).lower():
+                return "DOWN", f"Connection timeout to {host}:{port}"
+            return "DOWN", f"Connection failed to {host}:{port}: {detail}"
 
     def _check_ping(self, task: Dict[str, Any], timeout: float) -> Tuple[str, str]:
-        """ICMP ping check"""
+        """ICMP ping check (requires the optional `ping` binary)"""
         host = task.get("host")
 
         if not host:
@@ -226,7 +228,7 @@ class HealthCheckAgent:
 
         try:
             result = subprocess.run(
-                ["ping", "-c", "1", "-W", str(int(timeout)), host],
+                ["ping", "-c", "1", "-W", str(int(timeout)) if timeout else "1", host],
                 capture_output=True,
                 text=True,
                 timeout=timeout + 1,
@@ -234,11 +236,15 @@ class HealthCheckAgent:
 
             if result.returncode == 0:
                 return "UP", ""
+            elif "not found" in (result.stderr or "") or "No such file" in (result.stderr or ""):
+                return "DOWN", "ping binary not available on this host"
             else:
                 return "DOWN", "Ping failed"
 
         except subprocess.TimeoutExpired:
             return "DOWN", "Ping timeout"
+        except FileNotFoundError:
+            return "DOWN", "ping binary not available on this host"
 
     def _check_command(self, task: Dict[str, Any], timeout: float) -> Tuple[str, str]:
         """Execute arbitrary shell command"""
@@ -314,8 +320,8 @@ def main():
     parser = argparse.ArgumentParser(description="Recur Health Check Agent")
     parser.add_argument(
         "--config",
-        default="/etc/recur/config.yaml",
-        help="Configuration file path",
+        default=os.environ.get("RECUR_AGENT_CONFIG_FILE", "/etc/recur/config.yaml"),
+        help="Configuration file path (or RECUR_AGENT_CONFIG_FILE)",
     )
     parser.add_argument(
         "--agent-id",

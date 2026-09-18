@@ -135,12 +135,7 @@ async def list_system_forest(
     path "forest" is not captured as a system id.
     """
     child_ids = select(SystemDependency.child_system_id)
-    roots = (
-        db.query(System)
-        .filter(~System.id.in_(child_ids))
-        .order_by(System.name)
-        .all()
-    )
+    roots = db.query(System).filter(~System.id.in_(child_ids)).order_by(System.name).all()
 
     trees = StatusEvaluator.get_system_forest(roots, db)
 

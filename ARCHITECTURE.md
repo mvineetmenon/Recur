@@ -37,8 +37,8 @@ Recur is a distributed health monitoring system with three main components:
     │                 │                 │                  │
 ┌───▼───────┐  ┌────▼─────┐  ┌────────▼──┐  ┌─────────────▼──┐
 │  Agent 1  │  │  Agent 2  │  │  Agent 3  │  │   Agent N     │
-│ (Bash +   │  │ (Bash +   │  │ (Bash +   │  │ (Bash +       │
-│  Python)  │  │  Python)  │  │  Python)  │  │  Python)      │
+│ (Python)  │  │ (Python)  │  │ (Python)  │  │  (Python)     │
+│           │  │           │  │           │  │               │
 │           │  │           │  │           │  │               │
 │ Config:   │  │ Config:   │  │ Config:   │  │ Config:       │
 │ .yaml     │  │ .yaml     │  │ .yaml     │  │ .yaml         │
@@ -160,50 +160,63 @@ main.py                  # FastAPI app initialization, lifespan management
 └────────────────────────┘
 ```
 
-### 2. Agent (Bash + Python)
+### 2. Agent (Python)
 
 **Location**: `agent/` (repo root)
+
+The agent is pure Python (stdlib only, plus PyYAML for config parsing).
+PyYAML is resolved by `_bootstrap.py`, which prefers the system package and
+falls back to the pure-Python copy vendored in `agent/vendor/yaml/` — so the
+only runtime requirement on a monitored host is `python3` (no pip, no OS
+package access; air-gapped friendly).
 
 #### Execution Flow
 
 ```
 ┌──────────────────────────────────────┐
-│  recur-agent.sh (Main Loop)          │
-│  - Loads configuration               │
+│  recur_agent.py (Main Loop)          │
+│  - Loads .env overrides + config     │
 │  - Registers with server             │
 │  - Runs periodic health checks       │
 └──────────┬───────────────────────────┘
            │
-           ├─ Load YAML config
+           ├─ Load YAML config (system or vendored PyYAML)
            │
-           ├─ Call: health_check_utils.py
-           │         (execute checks)
+           ├─ health_check_utils.HealthCheckAgent
+           │   (execute checks, incl. nested dependencies)
            │
            ├─ Build JSON report tree
            │
-           ├─ POST /api/v1/status
+           ├─ POST /api/v1/status (urllib)
            │
-           └─ Send heartbeat
+           └─ PUT /api/v1/agents/{id}/heartbeat (urllib)
 ```
 
 #### Agent Components
 
-**recur-agent.sh**:
-- Main entry point (Bash)
+**recur_agent.py**:
+- Main entry point (`/usr/local/bin/recur-agent` symlink)
+- `.env` / environment override loading
 - Configuration loading
 - Agent registration
-- Periodic health check loop
-- Report submission
+- Periodic health check loop (SIGTERM/SIGINT-aware)
+- Report submission (urllib, no curl required)
 - Heartbeat management
+- CLI: `recur-agent {run|check|register|report}`
+
+**_bootstrap.py**:
+- Resolves PyYAML: system package first, vendored pure-Python copy as
+  fallback (enables air-gapped installs)
 
 **health_check_utils.py**:
-- YAML parsing using PyYAML
+- YAML parsing (via `_bootstrap`)
 - Recursive check execution
 - Task type handling:
-  - HTTP/HTTPS (curl-based)
-  - TCP (bash socket check)
-  - Ping (ICMP)
+  - HTTP/HTTPS (urllib-based)
+  - TCP (socket-based)
+  - Ping (ICMP, optional `ping` binary)
   - Command (arbitrary shell)
+  - Script (executable file)
 - JSON report generation
 
 #### Configuration Format
@@ -285,9 +298,10 @@ No code changes needed to add new systems or checks.
 
 ### 3. Lightweight Agent
 
-- Pure Bash when possible
-- Python only for YAML parsing and complex logic
-- Minimal dependencies
+- Pure Python (stdlib only, plus PyYAML for config)
+- PyYAML is vendored in `agent/vendor/` — no pip or OS package access needed
+  on monitored hosts (air-gapped friendly)
+- Minimal dependencies: `python3` is the only requirement
 - Installed under `/usr/local/lib/recur/` (symlinked into `/usr/local/bin/`)
 - Systemd service for management
 
@@ -311,7 +325,7 @@ No code changes needed to add new systems or checks.
 
 ```python
 def check_http(task, timeout):
-    # curl to target URL
+    # GET target URL (urllib)
     # Compare HTTP status code
     # Return: UP/DOWN, duration, error message
 ```

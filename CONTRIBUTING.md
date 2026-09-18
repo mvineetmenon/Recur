@@ -127,7 +127,7 @@ Recur/
 - **API Routes**: `server/app/routers/`
 - **Database Models**: `server/app/models.py`
 - **Business Logic**: `server/app/services/`
-- **Agent**: `agent/recur-agent.sh`
+- **Agent**: `agent/recur_agent.py` (check executor: `agent/health_check_utils.py`)
 - **Tests**: `server/tests/`
 
 ## Adding New Features
