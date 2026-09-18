@@ -41,6 +41,17 @@ class AgentResponse(BaseModel):
         from_attributes = True
 
 
+class AgentRegisterResponse(AgentResponse):
+    """Registration response.
+
+    ``agent_token`` carries the plaintext bearer token, but ONLY in the
+    response to the first registration of an agent (it is never returned by
+    list/get endpoints).
+    """
+
+    agent_token: Optional[str] = None
+
+
 class AgentListResponse(BaseModel):
     """List of agents"""
 

@@ -84,8 +84,8 @@ class TestAgentRouters:
         assert response.status_code == 404
 
     def test_agent_heartbeat(self, client):
-        """Test agent heartbeat endpoint"""
-        client.post(
+        """Test agent heartbeat endpoint (requires the agent token)"""
+        registration = client.post(
             "/api/v1/agents/register",
             json={
                 "agent_id": "hb-test-1",
@@ -93,7 +93,11 @@ class TestAgentRouters:
                 "ip_address": "192.168.1.100",
             },
         )
-        response = client.put("/api/v1/agents/hb-test-1/heartbeat")
+        token = registration.json()["agent_token"]
+        response = client.put(
+            "/api/v1/agents/hb-test-1/heartbeat",
+            headers={"Authorization": f"Bearer {token}"},
+        )
         assert response.status_code == 200
 
     def test_delete_agent(self, client):
@@ -739,6 +743,7 @@ class TestIntegration:
             },
         )
         assert agent_response.status_code in [200, 201]
+        token = agent_response.json()["agent_token"]
 
         # 2. Create system (agent_id is the integer DB id from registration)
         system_response = client.post(
@@ -762,6 +767,7 @@ class TestIntegration:
         # 4. Submit status
         status_response = client.post(
             "/api/v1/status",
+            headers={"Authorization": f"Bearer {token}"},
             json={
                 "agent_id": "workflow-agent",
                 "timestamp": datetime.now(timezone.utc).isoformat(),

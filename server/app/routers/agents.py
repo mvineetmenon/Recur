@@ -5,13 +5,14 @@ Agent management endpoints
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from .. import config
 from ..database import get_db
 from ..models import Agent, HealthStatus, StatusReport, TaskResult
-from ..schemas import AgentListResponse, AgentRegisterRequest, AgentResponse
+from ..schemas import AgentListResponse, AgentRegisterRequest, AgentRegisterResponse, AgentResponse
+from ..security import authenticate_agent, client_ip, hash_token, new_agent_token, verify_enrollment
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,16 +20,32 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 
 
-@router.post("/agents/register", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/agents/register", response_model=AgentRegisterResponse, status_code=status.HTTP_201_CREATED
+)
 async def register_agent(
     agent_data: AgentRegisterRequest,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
 ):
     """
     Register a new agent
 
     Agents must register with the server before they can submit status reports.
+    First registration issues a bearer token (returned once as ``agent_token``).
+    Re-registration rotates the agent's token and returns the new plaintext,
+    which is the recovery path for agents that lost their token file (e.g.
+    upgraded from a pre-token build). When ``RECUR_ENROLLMENT_TOKEN`` is
+    configured, registration requires the token (``X-Recur-Enrollment-Token``
+    header) unless the agent already holds a valid token.
     """
+    if not verify_enrollment(request, db, agent_data.agent_id):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Registration requires a valid enrollment token or the agent's existing token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     try:
         # Check if agent already exists
         existing = db.query(Agent).filter(Agent.agent_id == agent_data.agent_id).first()
@@ -46,12 +63,25 @@ async def register_agent(
                 existing.python_version = agent_data.python_version
             existing.last_heartbeat = datetime.utcnow()
 
+            # Rotate the token on re-registration (recovery path for lost
+            # token files; in closed mode the request is gated by
+            # verify_enrollment above).
+            token = new_agent_token()
+            existing.token_hash = hash_token(token)
+
             db.commit()
-            logger.info(f"Updated agent registration: {agent_data.agent_id}")
+            logger.info(
+                "Updated agent registration: %s (token rotated) (from %s)",
+                agent_data.agent_id,
+                client_ip(request),
+            )
 
-            return AgentResponse.model_validate(existing)
+            base = AgentResponse.model_validate(existing)
+            return AgentRegisterResponse(**base.model_dump(), agent_token=token)
 
-        # Create new agent
+        # Create new agent (issue its bearer token; the plaintext is returned
+        # exactly once, in this response)
+        token = new_agent_token()
         agent = Agent(
             agent_id=agent_data.agent_id,
             hostname=agent_data.hostname,
@@ -62,14 +92,30 @@ async def register_agent(
             os_type=agent_data.os_type,
             cpu_count=agent_data.cpu_count,
             python_version=agent_data.python_version,
+            token_hash=hash_token(token),
         )
 
         db.add(agent)
         db.commit()
 
-        logger.info(f"Registered new agent: {agent_data.agent_id} ({agent_data.hostname})")
+        if not config.ENROLLMENT_TOKEN:
+            logger.warning(
+                "Registered new agent %s (%s) via OPEN enrollment (set RECUR_ENROLLMENT_TOKEN "
+                "to require one) (from %s)",
+                agent_data.agent_id,
+                agent_data.hostname,
+                client_ip(request),
+            )
+        else:
+            logger.info(
+                "Registered new agent: %s (%s) (from %s)",
+                agent_data.agent_id,
+                agent_data.hostname,
+                client_ip(request),
+            )
 
-        return AgentResponse.model_validate(agent)
+        base = AgentResponse.model_validate(agent)
+        return AgentRegisterResponse(**base.model_dump(), agent_token=token)
 
     except Exception as e:
         logger.error(f"Failed to register agent: {e}")
@@ -191,17 +237,26 @@ async def trigger_agent_check(
 @router.put("/agents/{agent_id}/heartbeat")
 async def agent_heartbeat(
     agent_id: str,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
+    agent: Annotated[Agent, Depends(authenticate_agent)],
 ):
     """
     Record a heartbeat from an agent (keep-alive)
-    """
-    agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
 
-    if not agent:
+    Requires the agent's bearer token, which must belong to the agent named in
+    the URL.
+    """
+    if agent.agent_id != agent_id:
+        logger.warning(
+            "Heartbeat for agent %s rejected: token belongs to %s (from %s)",
+            agent_id,
+            agent.agent_id,
+            client_ip(request),
+        )
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Agent '{agent_id}' not found",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Token does not belong to this agent",
         )
 
     agent.last_heartbeat = datetime.utcnow()
@@ -242,6 +297,7 @@ def _delete_agent_related(db: Session, agent: Agent) -> None:
 @router.delete("/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_agent(
     agent_id: str,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
 ):
     """
@@ -260,6 +316,6 @@ async def delete_agent(
     db.delete(agent)
     db.commit()
 
-    logger.info(f"Deleted agent: {agent_id}")
+    logger.info("Deleted agent: %s (from %s)", agent_id, client_ip(request))
 
     return None

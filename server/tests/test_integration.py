@@ -42,6 +42,7 @@ class TestFullNestedFlow:
         )
         assert response.status_code == 201
         agent_db_id = response.json()["id"]
+        agent_token = response.json()["agent_token"]
 
         # 2. Create system with nested dependencies
         config = {
@@ -89,6 +90,7 @@ class TestFullNestedFlow:
         # 3. Submit a nested report: web UP, pg DOWN (the failing leaf)
         response = client.post(
             "/api/v1/status",
+            headers={"Authorization": f"Bearer {agent_token}"},
             json={
                 "agent_id": "flow-agent",
                 "timestamp": _now(),
@@ -253,8 +255,10 @@ class TestDockerComposeSmoke:
         assert "healthy" in probe.stdout
 
     def test_register_report_tree(self):
-        def curl(args, data=None):
+        def curl(args, data=None, auth=None):
             cmd = ["curl", "-sf", "-X", "POST", "-H", "Content-Type: application/json"]
+            if auth is not None:
+                cmd += ["-H", f"Authorization: Bearer {auth}"]
             if data is not None:
                 cmd += ["-d", data]
             cmd += args
@@ -266,6 +270,7 @@ class TestDockerComposeSmoke:
         )
         assert register.returncode == 0
         agent_db_id = json.loads(register.stdout)["id"]
+        agent_token = json.loads(register.stdout)["agent_token"]
 
         create = curl(
             [self.BASE_URL + "/api/v1/systems"],
@@ -291,6 +296,7 @@ class TestDockerComposeSmoke:
 
         report = curl(
             [self.BASE_URL + "/api/v1/status"],
+            auth=agent_token,
             data=json.dumps(
                 {
                     "agent_id": "smoke-agent",

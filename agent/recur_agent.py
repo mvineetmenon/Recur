@@ -19,6 +19,16 @@ Environment overrides (also from a .env file, see RECUR_AGENT_ENV_FILE):
     RECUR_AGENT_SERVER_URL   (default http://localhost:8000)
     RECUR_AGENT_ID           (default: hostname)
     RECUR_AGENT_LOG_FILE     (default /var/log/recur-agent.log)
+    RECUR_AGENT_TOKEN_FILE   (default /etc/recur/agent.token)
+    RECUR_AGENT_ENROLLMENT_TOKEN  (bootstrap token for first registration,
+                         when the server requires RECUR_ENROLLMENT_TOKEN)
+
+Authentication:
+    On first registration the server issues a bearer token (returned once in
+    the response). The agent stores it in RECUR_AGENT_TOKEN_FILE (mode 0600)
+    and sends it as "Authorization: Bearer <token>" on every subsequent call.
+    If the server rejects the token (401/403) the agent deletes it and
+    re-registers on the next cycle.
 """
 
 from __future__ import annotations
@@ -116,13 +126,25 @@ def first_ipv4() -> str:
 
 
 def http_request(
-    method: str, url: str, payload: Optional[Dict[str, Any]] = None, timeout: float = SERVER_TIMEOUT
+    method: str,
+    url: str,
+    payload: Optional[Dict[str, Any]] = None,
+    timeout: float = SERVER_TIMEOUT,
+    token: Optional[str] = None,
+    enrollment_token: Optional[str] = None,
 ) -> Tuple[int, str]:
-    """Perform an HTTP request; returns (status_code, body_text)."""
+    """Perform an HTTP request; returns (status_code, body_text).
+
+    ``token`` is sent as an Authorization bearer header; ``enrollment_token``
+    (used only when no agent token exists yet) as X-Recur-Enrollment-Token.
+    """
     data = json.dumps(payload).encode() if payload is not None else None
-    request = urllib.request.Request(
-        url, data=data, method=method, headers={"Content-Type": "application/json"}
-    )
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    elif enrollment_token:
+        headers["X-Recur-Enrollment-Token"] = enrollment_token
+    request = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.status, response.read().decode("utf-8", "replace")
@@ -145,8 +167,46 @@ class RecurAgent:
             "/"
         )
         self.agent_id = os.environ.get("RECUR_AGENT_ID") or socket.gethostname()
+        self.token_file = os.environ.get("RECUR_AGENT_TOKEN_FILE", "/etc/recur/agent.token")
+        self.enrollment_token = os.environ.get("RECUR_AGENT_ENROLLMENT_TOKEN", "").strip()
+        self.token: Optional[str] = self._load_token()
         self.registered = False
         self._stop = threading.Event()
+
+    # -- token handling -------------------------------------------------------
+
+    def _load_token(self) -> Optional[str]:
+        try:
+            return Path(self.token_file).read_text().strip() or None
+        except OSError:
+            return None
+
+    def _save_token(self, token: str) -> None:
+        """Persist the agent token (mode 0600) atomically."""
+        path = Path(self.token_file)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(token + "\n")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, path)
+            log.info("Saved agent token to %s", path)
+        except OSError as e:
+            log.error(
+                "Could not save agent token to %s: %s (token kept in memory only; "
+                "re-registration is required after a restart)",
+                path,
+                e,
+            )
+
+    def _invalidate_token(self, reason: str) -> None:
+        log.warning("Agent token rejected (%s); deleting %s and re-registering", reason, self.token_file)
+        self.token = None
+        try:
+            Path(self.token_file).unlink()
+        except OSError:
+            pass
+        self.registered = False
 
     # -- config ---------------------------------------------------------------
 
@@ -176,14 +236,44 @@ class RecurAgent:
         }
         try:
             status, body = http_request(
-                "POST", f"{self.server_url}/api/v1/agents/register", payload
+                "POST",
+                f"{self.server_url}/api/v1/agents/register",
+                payload,
+                token=self.token,
+                enrollment_token=None if self.token else self.enrollment_token,
             )
         except ConnectionError as e:
             log.error("Failed to register agent: %s", e)
             return False
 
-        if 200 <= status < 300 and "agent_id" in body:
+        if status in (401, 403) and self.token is not None:
+            # Stale token (e.g. the agent record was deleted server-side):
+            # drop it and retry once as a first-time registration.
+            self._invalidate_token(f"HTTP {status} on register")
+            try:
+                status, body = http_request(
+                    "POST",
+                    f"{self.server_url}/api/v1/agents/register",
+                    payload,
+                    enrollment_token=self.enrollment_token,
+                )
+            except ConnectionError as e:
+                log.error("Failed to register agent: %s", e)
+                return False
+
+        if 200 <= status < 300:
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                data = {}
+            if "agent_id" not in data:
+                log.error("Failed to register agent (HTTP %s): %s", status, body.strip())
+                return False
             log.info("Agent registered successfully")
+            agent_token = data.get("agent_token")
+            if agent_token:
+                self.token = agent_token
+                self._save_token(agent_token)
             self.registered = True
             return True
 
@@ -196,7 +286,9 @@ class RecurAgent:
     def submit_report(self, report: Dict[str, Any]) -> bool:
         log.info("Submitting report to: %s/api/v1/status", self.server_url)
         try:
-            status, body = http_request("POST", f"{self.server_url}/api/v1/status", report)
+            status, body = http_request(
+                "POST", f"{self.server_url}/api/v1/status", report, token=self.token
+            )
         except ConnectionError as e:
             log.error("Failed to submit report: %s", e)
             return False
@@ -205,13 +297,17 @@ class RecurAgent:
             log.info("Report submitted successfully")
             return True
 
+        if status in (401, 403):
+            self._invalidate_token(f"HTTP {status}")
         log.error("Failed to submit report (HTTP %s): %s", status, body.strip())
         return False
 
     def heartbeat(self) -> bool:
         try:
-            status, _ = http_request(
-                "PUT", f"{self.server_url}/api/v1/agents/{self.agent_id}/heartbeat"
+            status, body = http_request(
+                "PUT",
+                f"{self.server_url}/api/v1/agents/{self.agent_id}/heartbeat",
+                token=self.token,
             )
         except ConnectionError as e:
             log.error("Failed to send heartbeat: %s", e)
@@ -221,7 +317,9 @@ class RecurAgent:
             log.info("Heartbeat sent")
             return True
 
-        log.error("Failed to send heartbeat (HTTP %s)", status)
+        if status in (401, 403):
+            self._invalidate_token(f"HTTP {status}")
+        log.error("Failed to send heartbeat (HTTP %s): %s", status, body.strip())
         return False
 
     # -- main loop ------------------------------------------------------------

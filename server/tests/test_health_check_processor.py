@@ -561,7 +561,7 @@ class TestProcessStatusReport:
         assert len(tree["dependencies"]) == 1
 
     def test_report_for_unknown_agent_rejected_by_api(self, client):
-        """The router rejects status reports from unregistered agents (404)"""
+        """The router rejects status reports without an agent token (401)"""
         response = client.post(
             "/api/v1/status",
             json={
@@ -570,11 +570,11 @@ class TestProcessStatusReport:
                 "system_status": {"system_id": "nope", "tasks": []},
             },
         )
-        assert response.status_code == 404
+        assert response.status_code == 401
 
     def test_report_for_unknown_system_auto_registers_it(self, client):
         """A registered agent's first report for a new system registers it (200)"""
-        client.post(
+        registration = client.post(
             "/api/v1/agents/register",
             json={
                 "agent_id": "known-agent",
@@ -582,8 +582,10 @@ class TestProcessStatusReport:
                 "ip_address": "192.168.1.60",
             },
         )
+        token = registration.json()["agent_token"]
         response = client.post(
             "/api/v1/status",
+            headers={"Authorization": f"Bearer {token}"},
             json={
                 "agent_id": "known-agent",
                 "timestamp": datetime.now(timezone.utc).isoformat(),

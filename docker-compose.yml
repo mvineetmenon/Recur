@@ -15,7 +15,13 @@ services:
       - DATABASE_URL=postgresql+psycopg2://recur:${DB_PASSWORD:-recur-dev-password}@postgres:5432/recur
       - DEBUG=${DEBUG:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      # Explicit bind for the container (the standalone default is loopback).
+      - HOST=0.0.0.0
+      - PORT=8000
+      # Empty default: CORS disabled unless .env sets CORS_ORIGINS.
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      # Empty default: open agent registration (dev). Set for real deployments.
+      - RECUR_ENROLLMENT_TOKEN=${RECUR_ENROLLMENT_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

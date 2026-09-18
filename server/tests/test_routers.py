@@ -21,6 +21,16 @@ def _register_agent(client, agent_id, hostname="test.local"):
     )
 
 
+def _token(response):
+    """Bearer token issued to the agent by a first registration"""
+    return response.json()["agent_token"]
+
+
+def _auth(token):
+    """Authorization headers for an agent token"""
+    return {"Authorization": f"Bearer {token}"}
+
+
 class TestAgentRoutes:
     """Tests for agent management endpoints"""
 
@@ -95,19 +105,82 @@ class TestAgentRoutes:
         assert data["systems"] == []
 
     def test_agent_heartbeat(self, client):
-        """Test agent heartbeat"""
-        _register_agent(client, "test-agent-hb")
+        """Test agent heartbeat with a valid token"""
+        registration = _register_agent(client, "test-agent-hb")
+        token = _token(registration)
 
-        response = client.put("/api/v1/agents/test-agent-hb/heartbeat")
+        response = client.put("/api/v1/agents/test-agent-hb/heartbeat", headers=_auth(token))
 
         assert response.status_code == 200
         data = response.json()
         assert data["agent_id"] == "test-agent-hb"
 
     def test_heartbeat_unknown_agent(self, client):
-        """Test heartbeat for unregistered agent returns 404"""
+        """Test heartbeat without a token returns 401"""
         response = client.put("/api/v1/agents/ghost/heartbeat")
-        assert response.status_code == 404
+        assert response.status_code == 401
+
+    def test_heartbeat_invalid_token(self, client):
+        """Test heartbeat with an unknown token returns 401"""
+        response = client.put("/api/v1/agents/ghost/heartbeat", headers=_auth("not-a-real-token"))
+        assert response.status_code == 401
+
+    def test_heartbeat_token_agent_mismatch(self, client):
+        """Test heartbeat with another agent's token returns 403"""
+        registration = _register_agent(client, "test-agent-hb-other")
+        token = _token(registration)
+
+        response = client.put("/api/v1/agents/someone-else/heartbeat", headers=_auth(token))
+        assert response.status_code == 403
+
+    def test_register_reregistration_rotates_token(self, client):
+        """First registration issues a token; re-registration rotates it and
+        returns the new plaintext (recovery path for lost token files)."""
+        first = _register_agent(client, "test-agent-rotate")
+        assert first.status_code == 201
+        token = _token(first)
+        assert token
+
+        again = _register_agent(client, "test-agent-rotate")
+        assert again.status_code == 201
+        new_token = again.json()["agent_token"]
+        assert new_token and new_token != token
+
+        # the old token is no longer valid
+        old = client.put("/api/v1/agents/test-agent-rotate/heartbeat", headers=_auth(token))
+        assert old.status_code == 401
+        # the rotated token works
+        ok = client.put("/api/v1/agents/test-agent-rotate/heartbeat", headers=_auth(new_token))
+        assert ok.status_code == 200
+
+    def test_register_requires_enrollment_when_configured(self, client, monkeypatch):
+        """With RECUR_ENROLLMENT_TOKEN set, new registrations need the enrollment
+        token (or an existing agent token); without it they get 401."""
+        from server.app import config
+
+        monkeypatch.setattr(config, "ENROLLMENT_TOKEN", "enroll-secret")
+
+        response = _register_agent(client, "test-agent-enrolled")
+        assert response.status_code == 401
+
+        response = client.post(
+            "/api/v1/agents/register",
+            headers={"X-Recur-Enrollment-Token": "enroll-secret"},
+            json={
+                "agent_id": "test-agent-enrolled",
+                "hostname": "enroll.local",
+                "ip_address": "192.168.1.100",
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["agent_token"]
+
+    def test_register_open_enrollment_issues_token(self, client):
+        """Without an enrollment token configured, registration is open and
+        still issues a per-agent token."""
+        response = _register_agent(client, "test-agent-open")
+        assert response.status_code == 201
+        assert response.json()["agent_token"]
 
     def test_delete_agent(self, client):
         """Test agent deletion returns 204 and removes the agent"""
@@ -128,6 +201,7 @@ class TestAgentRoutes:
         """
         registration = _register_agent(client, "test-agent-del-reports")
         agent_db_id = registration.json()["id"]
+        token = _token(registration)
 
         system = client.post(
             "/api/v1/systems",
@@ -145,6 +219,7 @@ class TestAgentRoutes:
 
         report = client.post(
             "/api/v1/status",
+            headers=_auth(token),
             json={
                 "agent_id": "test-agent-del-reports",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -485,6 +560,7 @@ class TestStatusRoutes:
         agent = _register_agent(client, "status-test-agent")
         assert agent.status_code == 201
         self.agent_db_id = agent.json()["id"]
+        self.token = _token(agent)
 
         system = client.post(
             "/api/v1/systems",
@@ -519,20 +595,28 @@ class TestStatusRoutes:
             },
         }
 
+    def _post_report(self, client, payload):
+        return client.post("/api/v1/status", json=payload, headers=_auth(self.token))
+
     def test_submit_status_report(self, client):
         """Test status report submission is accepted"""
-        response = client.post("/api/v1/status", json=self._report())
+        response = self._post_report(client, self._report())
 
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "accepted"
         assert "report_id" in data
 
+    def test_submit_status_report_requires_token(self, client):
+        """Test status report without a token returns 401"""
+        response = client.post("/api/v1/status", json=self._report())
+        assert response.status_code == 401
+
     def test_submit_status_report_with_tasks(self, client):
         """Test task results are recorded and reflected in the system"""
-        response = client.post(
-            "/api/v1/status",
-            json=self._report(
+        response = self._post_report(
+            client,
+            self._report(
                 tasks=[
                     {
                         "task_id": "s-task",
@@ -553,9 +637,9 @@ class TestStatusRoutes:
 
     def test_submit_status_report_down_task(self, client):
         """Test a DOWN task rolls the system status down"""
-        client.post(
-            "/api/v1/status",
-            json=self._report(
+        self._post_report(
+            client,
+            self._report(
                 tasks=[
                     {
                         "task_id": "s-task",
@@ -572,16 +656,16 @@ class TestStatusRoutes:
         system = client.get("/api/v1/systems/status-test-system")
         assert system.json()["status"] == "DOWN"
 
-    def test_submit_status_report_unknown_agent(self, client):
-        """Test status report with unknown agent returns 404"""
-        response = client.post("/api/v1/status", json=self._report(agent_id="unknown-agent"))
-        assert response.status_code == 404
+    def test_submit_status_report_agent_mismatch(self, client):
+        """Test a report claiming another agent's id is rejected (403)"""
+        response = self._post_report(client, self._report(agent_id="unknown-agent"))
+        assert response.status_code == 403
 
     def test_submit_status_report_unknown_system_auto_registers(self, client):
         """Test first report for an unknown system registers it (200)"""
         payload = self._report()
         payload["system_status"]["system_id"] = "no-such-system"
-        response = client.post("/api/v1/status", json=payload)
+        response = self._post_report(client, payload)
         assert response.status_code == 200
         assert client.get("/api/v1/systems/no-such-system").status_code == 200
 
@@ -589,6 +673,7 @@ class TestStatusRoutes:
         """A report with neither system_id nor name is rejected (400)"""
         response = client.post(
             "/api/v1/status",
+            headers=_auth(self.token),
             json={
                 "agent_id": "status-test-agent",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -607,7 +692,7 @@ class TestStatusRoutes:
 
     def test_get_system_history(self, client):
         """Test getting system status history (returns a dict)"""
-        client.post("/api/v1/status", json=self._report())
+        self._post_report(client, self._report())
 
         response = client.get("/api/v1/systems/status-test-system/history?limit=10")
 

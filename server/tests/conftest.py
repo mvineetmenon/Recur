@@ -132,16 +132,27 @@ def client(test_db):
 
 
 # Pre-seeded fixtures
+TEST_AGENT_TOKEN = "test-agent-token"
+
+
+@pytest.fixture
+def agent_token():
+    """Bearer token of the agent created by the db_with_agent fixture"""
+    return TEST_AGENT_TOKEN
+
+
 @pytest.fixture
 def db_with_agent(test_db):
-    """Database session plus a registered test agent"""
+    """Database session plus a registered test agent (with a bearer token)"""
     from server.app.models import Agent, HealthStatus
+    from server.app.security import hash_token
 
     agent = Agent(
         agent_id="test-agent-1",
         hostname="test.local",
         ip_address="192.168.1.100",
         status=HealthStatus.UP,
+        token_hash=hash_token(TEST_AGENT_TOKEN),
     )
     test_db.add(agent)
     test_db.commit()

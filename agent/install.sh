@@ -155,6 +155,12 @@ else
 # RECUR_AGENT_SERVER_URL=http://your-server:8000
 # RECUR_AGENT_ID=agent-01
 # RECUR_AGENT_LOG_FILE=/var/log/recur/agent.log
+#
+# Auth: the agent stores its server-issued token in this file (0600).
+# RECUR_AGENT_TOKEN_FILE=/etc/recur/agent.token
+# Required on first registration only, when the server is configured with
+# RECUR_ENROLLMENT_TOKEN (ask the server operator for the value):
+# RECUR_AGENT_ENROLLMENT_TOKEN=<enrollment token>
 ENVEOF
     chmod 644 /etc/recur/agent.env
 fi

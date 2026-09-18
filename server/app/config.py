@@ -31,11 +31,20 @@ API_VERSION = "0.1.0"
 
 # Server
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
-HOST = os.getenv("HOST", "0.0.0.0")
+# Standalone default is loopback: put a reverse proxy in front for network
+# access. Docker mode sets HOST=0.0.0.0 explicitly (see docker-compose.yml).
+HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "8000"))
 
-# CORS: comma-separated origins; "*" allows all (dev default)
-CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
+# CORS: comma-separated origins; empty (default) disables the CORS middleware
+# entirely. The dashboard is served same-origin, so it needs no CORS.
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+
+# Security
+# Pre-shared token required for NEW agent registrations when set. Agents that
+# already hold a valid token can re-register without it. When empty,
+# registration is open (dev mode) and each open registration logs a warning.
+ENROLLMENT_TOKEN = os.getenv("RECUR_ENROLLMENT_TOKEN", "")
 
 # Pagination
 DEFAULT_PAGE_SIZE = 20

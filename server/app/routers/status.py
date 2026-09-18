@@ -5,12 +5,13 @@ Status report endpoints
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Agent
 from ..schemas import HealthCheckResponse, StatusReportRequest
+from ..security import authenticate_agent, client_ip
 from ..services.health_check import HealthCheckProcessor
 from ..utils.logger import get_logger
 
@@ -22,22 +23,30 @@ router = APIRouter(prefix="/api/v1", tags=["status"])
 @router.post("/status", response_model=dict)
 async def submit_status_report(
     report: StatusReportRequest,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
+    agent: Annotated[Agent, Depends(authenticate_agent)],
 ):
     """
     Accept a status report from an agent
 
     This endpoint receives the complete status tree from an agent and processes it,
     updating all task results and system statuses in the database.
+
+    Requires the agent's bearer token, and the report's ``agent_id`` must match
+    the token's owner (agents cannot report for other agents).
     """
     try:
-        # Find agent
-        agent = db.query(Agent).filter(Agent.agent_id == report.agent_id).first()
-        if not agent:
-            logger.warning(f"Status report from unknown agent: {report.agent_id}")
+        if agent.agent_id != report.agent_id:
+            logger.warning(
+                "Rejected report claiming agent_id %r (token owner: %r, from %s)",
+                report.agent_id,
+                agent.agent_id,
+                client_ip(request),
+            )
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Agent '{report.agent_id}' not found. Please register first.",
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Token does not match report agent_id",
             )
 
         # Get system ID from report

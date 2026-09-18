@@ -32,22 +32,28 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Recur server...")
 
 
-# Create FastAPI app
+# Create FastAPI app. Interactive docs are only exposed in debug mode; in
+# production they would disclose the full API surface to unauthenticated callers.
 app = FastAPI(
     title=config.API_TITLE,
     version=config.API_VERSION,
     description="Recursive System Health Monitoring Platform",
     lifespan=lifespan,
+    docs_url="/docs" if config.DEBUG else None,
+    redoc_url="/redoc" if config.DEBUG else None,
+    openapi_url="/openapi.json" if config.DEBUG else None,
 )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=config.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Add CORS middleware only when explicitly configured. The dashboard is served
+# same-origin (no CORS needed); "*" would expose the API to any browser origin.
+if config.CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=config.CORS_ORIGINS,
+        allow_credentials="*" not in config.CORS_ORIGINS,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Web UI templates
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"

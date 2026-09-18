@@ -49,6 +49,9 @@ class Agent(Base):
     cpu_count: Mapped[Optional[int]] = mapped_column(Integer)
     python_version: Mapped[Optional[str]] = mapped_column(String(50))
 
+    # Auth: SHA-256 hash of the agent's bearer token (plaintext never stored)
+    token_hash: Mapped[Optional[str]] = mapped_column(String(128))
+
     # Relationships
     systems: Mapped[List["System"]] = relationship(back_populates="agent")
     status_reports: Mapped[List["StatusReport"]] = relationship(back_populates="agent")
