@@ -4,8 +4,6 @@ Unit tests for HealthCheckProcessor (nested report processing, roll-up, history)
 
 from datetime import datetime, timezone
 
-import pytest
-
 from server.app.models import (
     Agent,
     HealthStatus,
@@ -161,6 +159,216 @@ class TestProcessStatusReport:
         )
         assert link is not None
 
+    def test_first_report_auto_registers_root_system(self, test_db):
+        db = test_db
+        agent = _make_agent(db)
+
+        report = HealthCheckProcessor.process_status_report(
+            agent_id=agent.id,
+            system_id="fresh-sys",
+            report_timestamp=datetime.now(timezone.utc),
+            report_data={
+                "system_id": "fresh-sys",
+                "name": "Fresh System",
+                "status": "UP",
+                "tasks": [
+                    {"task_id": "t1", "name": "t1", "type": "http", "status": "UP"},
+                ],
+                "dependencies": [],
+            },
+            db=db,
+        )
+
+        # Root system auto-registered on first report, linked to the agent
+        system = _find_system(db, "fresh-sys")
+        assert system is not None
+        assert system.name == "Fresh System"
+        assert system.agent_id == agent.id
+        assert report.system_id == system.id
+
+        task = _find_task(db, "fresh-sys", "t1")
+        assert task is not None
+        assert task.status == HealthStatus.UP
+
+        # A second report updates the existing system (no duplicate rows)
+        HealthCheckProcessor.process_status_report(
+            agent_id=agent.id,
+            system_id="fresh-sys",
+            report_timestamp=datetime.now(timezone.utc),
+            report_data={
+                "system_id": "fresh-sys",
+                "name": "Fresh System",
+                "status": "DOWN",
+                "tasks": [
+                    {
+                        "task_id": "t1",
+                        "name": "t1",
+                        "type": "http",
+                        "status": "DOWN",
+                        "error": "boom",
+                    },
+                ],
+                "dependencies": [],
+            },
+            db=db,
+        )
+        systems = db.query(System).filter(System.system_id == "fresh-sys").all()
+        assert len(systems) == 1
+        task = _find_task(db, "fresh-sys", "t1")
+        assert task.status == HealthStatus.DOWN
+        assert task.last_error == "boom"
+
+    def test_removed_task_is_pruned_and_status_recovers(self, test_db):
+        db = test_db
+        agent = _make_agent(db)
+        _register_root(db, agent)
+
+        # First report: t1 UP + t2 DOWN -> system is DOWN
+        HealthCheckProcessor.process_status_report(
+            agent_id=agent.id,
+            system_id="root-sys",
+            report_timestamp=datetime.now(timezone.utc),
+            report_data={
+                "system_id": "root-sys",
+                "name": "Root",
+                "status": "DOWN",
+                "tasks": [
+                    {"task_id": "t1", "name": "t1", "type": "command", "status": "UP"},
+                    {
+                        "task_id": "t2",
+                        "name": "t2",
+                        "type": "command",
+                        "status": "DOWN",
+                        "error": "boom",
+                    },
+                ],
+                "dependencies": [],
+            },
+            db=db,
+        )
+        assert _find_system(db, "root-sys").status == HealthStatus.DOWN
+
+        # Config change: t2 removed; next report only contains t1
+        HealthCheckProcessor.process_status_report(
+            agent_id=agent.id,
+            system_id="root-sys",
+            report_timestamp=datetime.now(timezone.utc),
+            report_data={
+                "system_id": "root-sys",
+                "name": "Root",
+                "status": "UP",
+                "tasks": [
+                    {"task_id": "t1", "name": "t1", "type": "command", "status": "UP"},
+                ],
+                "dependencies": [],
+            },
+            db=db,
+        )
+        assert _find_task(db, "root-sys", "t2") is None
+        assert _find_task(db, "root-sys", "t1") is not None
+        assert _find_system(db, "root-sys").status == HealthStatus.UP
+
+    def test_removed_dependency_link_is_pruned(self, test_db):
+        db = test_db
+        agent = _make_agent(db)
+        _register_root(db, agent)
+
+        # Report with a DOWN nested dependency -> link created, root DOWN
+        HealthCheckProcessor.process_status_report(
+            agent_id=agent.id,
+            system_id="root-sys",
+            report_timestamp=datetime.now(timezone.utc),
+            report_data={
+                "system_id": "root-sys",
+                "name": "Root",
+                "status": "DOWN",
+                "tasks": [
+                    {"task_id": "t1", "name": "t1", "type": "command", "status": "UP"},
+                ],
+                "dependencies": [
+                    {
+                        "system_id": "db-layer",
+                        "name": "DB Layer",
+                        "status": "DOWN",
+                        "tasks": [
+                            {
+                                "task_id": "pg",
+                                "name": "pg",
+                                "type": "tcp",
+                                "status": "DOWN",
+                                "error": "refused",
+                            },
+                        ],
+                        "dependencies": [],
+                    },
+                ],
+            },
+            db=db,
+        )
+        root = _find_system(db, "root-sys")
+        child = _find_system(db, "root-sys/db-layer")
+        assert root.status == HealthStatus.DOWN
+        link = (
+            db.query(SystemDependency)
+            .filter(
+                SystemDependency.parent_system_id == root.id,
+                SystemDependency.child_system_id == child.id,
+            )
+            .first()
+        )
+        assert link is not None
+
+        # Config change: dependency removed
+        HealthCheckProcessor.process_status_report(
+            agent_id=agent.id,
+            system_id="root-sys",
+            report_timestamp=datetime.now(timezone.utc),
+            report_data={
+                "system_id": "root-sys",
+                "name": "Root",
+                "status": "UP",
+                "tasks": [
+                    {"task_id": "t1", "name": "t1", "type": "command", "status": "UP"},
+                ],
+                "dependencies": [],
+            },
+            db=db,
+        )
+        # Link pruned; child system row kept (another agent may report it)
+        link = (
+            db.query(SystemDependency)
+            .filter(
+                SystemDependency.parent_system_id == root.id,
+                SystemDependency.child_system_id == child.id,
+            )
+            .first()
+        )
+        assert link is None
+        assert _find_system(db, "root-sys/db-layer") is not None
+        assert _find_system(db, "root-sys").status == HealthStatus.UP
+
+    def test_system_name_follows_report(self, test_db):
+        db = test_db
+        agent = _make_agent(db)
+        _register_root(db, agent)
+
+        HealthCheckProcessor.process_status_report(
+            agent_id=agent.id,
+            system_id="root-sys",
+            report_timestamp=datetime.now(timezone.utc),
+            report_data={
+                "system_id": "root-sys",
+                "name": "Renamed Root",
+                "status": "UP",
+                "tasks": [
+                    {"task_id": "t1", "name": "t1", "type": "command", "status": "UP"},
+                ],
+                "dependencies": [],
+            },
+            db=db,
+        )
+        assert _find_system(db, "root-sys").name == "Renamed Root"
+
     def test_roll_up_down_propagates_to_root(self, test_db):
         db = test_db
         agent = _make_agent(db)
@@ -233,18 +441,21 @@ class TestProcessStatusReport:
         root = _find_system(db, "root-sys")
         assert root.status == HealthStatus.UP
 
-    def test_unknown_system_raises(self, test_db):
+    def test_unknown_system_is_auto_registered(self, test_db):
         db = test_db
         agent = _make_agent(db)
 
-        with pytest.raises(ValueError):
-            HealthCheckProcessor.process_status_report(
-                agent_id=agent.id,
-                system_id="does-not-exist",
-                report_timestamp=datetime.now(timezone.utc),
-                report_data={"system_id": "does-not-exist", "tasks": []},
-                db=db,
-            )
+        HealthCheckProcessor.process_status_report(
+            agent_id=agent.id,
+            system_id="does-not-exist",
+            report_timestamp=datetime.now(timezone.utc),
+            report_data={"system_id": "does-not-exist", "tasks": []},
+            db=db,
+        )
+
+        system = _find_system(db, "does-not-exist")
+        assert system is not None
+        assert system.agent_id == agent.id
 
     def test_self_referencing_dependency_link_skipped(self, test_db):
         """A report listing the root as its own dependency creates no self-link
@@ -361,8 +572,8 @@ class TestProcessStatusReport:
         )
         assert response.status_code == 404
 
-    def test_report_for_unknown_system_rejected_by_api(self, client):
-        """A registered agent reporting an unknown system gets 400"""
+    def test_report_for_unknown_system_auto_registers_it(self, client):
+        """A registered agent's first report for a new system registers it (200)"""
         client.post(
             "/api/v1/agents/register",
             json={
@@ -379,7 +590,8 @@ class TestProcessStatusReport:
                 "system_status": {"system_id": "ghost-system", "tasks": []},
             },
         )
-        assert response.status_code == 400
+        assert response.status_code == 200
+        assert client.get("/api/v1/systems/ghost-system").status_code == 200
 
     def test_task_status_uses_latest_result(self, test_db):
         db = test_db

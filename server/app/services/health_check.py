@@ -55,9 +55,15 @@ class HealthCheckProcessor:
         """
         Process an incoming status report from an agent
 
-        The report contains the full recursive status tree. Nested systems are
-        resolved (or auto-created) and every level's task results are recorded,
-        so the server-side recursive evaluation can roll status up the tree.
+        The report contains the full recursive status tree. The root system
+        and every nested system are auto-registered on first contact, and
+        every level's task results are recorded, so the server-side recursive
+        evaluation can roll status up the tree.
+
+        The report is treated as the agent's current configuration: the
+        system's display name follows the report, and tasks/dependency links
+        it no longer contains are pruned, so config edits on the agent are
+        picked up automatically (no manual server-side cleanup).
 
         Args:
             agent_id: ID of reporting agent
@@ -71,11 +77,9 @@ class HealthCheckProcessor:
         """
         start_time = datetime.utcnow()
 
-        # Find system
-        system = db.query(System).filter(System.system_id == system_id).first()
-        if not system:
-            logger.warning(f"Report for unknown system: {system_id}")
-            raise ValueError(f"System {system_id} not found")
+        # Resolve the root system, auto-registering it when the first report
+        # arrives (same behaviour as nested dependency systems)
+        system = HealthCheckProcessor._ensure_system(system_id, report_data, agent_id, db)
 
         # Create status report
         status_report = StatusReport(
@@ -101,6 +105,8 @@ class HealthCheckProcessor:
         # Evaluate and persist status for every level of the tree,
         # bottom-up, so the parent reflects the full recursive state
         new_status = HealthCheckProcessor._refresh_statuses(system, report_timestamp, db)
+        if report_data.get("name"):
+            system.name = report_data["name"]
         system.last_error = report_data.get("error")
 
         # Record processing duration
@@ -112,6 +118,50 @@ class HealthCheckProcessor:
         logger.info(f"Processed report for {system_id}: status={new_status}")
 
         return status_report
+
+    @staticmethod
+    def _ensure_system(system_id: str, data: Dict[str, Any], agent_id: int, db: Session) -> System:
+        """
+        Resolve a system by its id, auto-registering it (with its tasks) when
+        the first report for it arrives.
+        """
+        system = db.query(System).filter(System.system_id == system_id).first()
+        if system is None:
+            system = System(
+                system_id=system_id,
+                name=data.get("name") or system_id,
+                config=config_to_json_serializable(data),
+                status=HealthStatus.UNKNOWN,
+                agent_id=agent_id,
+            )
+            db.add(system)
+            db.flush()
+
+            # Materialize tasks from the reported results so later reports
+            # can be matched against real Task rows
+            for task_data in data.get("tasks", []):
+                task_name = task_data.get("task_id") or task_data.get("name")
+                if not task_name:
+                    continue
+                existing = (
+                    db.query(Task)
+                    .filter(Task.system_id == system.id, Task.task_id == task_name)
+                    .first()
+                )
+                if existing is None:
+                    db.add(
+                        Task(
+                            task_id=task_name,
+                            system_id=system.id,
+                            name=task_data.get("name") or task_name,
+                            task_type=str(task_data.get("type", "http")).lower(),
+                            config={},
+                            status=HealthStatus.UNKNOWN,
+                        )
+                    )
+            db.flush()
+            logger.info(f"Auto-registered system {system_id} from its first report")
+        return system
 
     @staticmethod
     def _resolve_nested_system(
@@ -134,39 +184,7 @@ class HealthCheckProcessor:
             child_id = f"{parent.system_id}/{child_id}"
             child = db.query(System).filter(System.system_id == child_id).first()
         if child is None:
-            child = System(
-                system_id=child_id,
-                name=dep_data.get("name") or child_id,
-                config=config_to_json_serializable(dep_data),
-                status=HealthStatus.UNKNOWN,
-                agent_id=agent_id,
-            )
-            db.add(child)
-            db.flush()
-
-            # Materialize tasks from the reported results so later reports
-            # can be matched against real Task rows
-            for task_data in dep_data.get("tasks", []):
-                task_name = task_data.get("task_id") or task_data.get("name")
-                if not task_name:
-                    continue
-                existing = (
-                    db.query(Task)
-                    .filter(Task.system_id == child.id, Task.task_id == task_name)
-                    .first()
-                )
-                if existing is None:
-                    db.add(
-                        Task(
-                            task_id=task_name,
-                            system_id=child.id,
-                            name=task_data.get("name") or task_name,
-                            task_type=str(task_data.get("type", "http")).lower(),
-                            config={},
-                            status=HealthStatus.UNKNOWN,
-                        )
-                    )
-            db.flush()
+            child = HealthCheckProcessor._ensure_system(child_id, dep_data, agent_id, db)
 
         # A report may reference an ancestor (or the parent itself) as a
         # "dependency"; linking it would create a cycle that makes recursive
@@ -207,25 +225,91 @@ class HealthCheckProcessor:
         report_timestamp: datetime,
         agent_id: int,
         db: Session,
+        prune_stale: bool = True,
     ) -> None:
         """
         Record task results for one system level of a report, then recurse
         into nested dependency results.
+
+        ``prune_stale`` is false for degenerate entries (e.g. a report that
+        references its own ancestor as a "dependency"): their data does not
+        mirror the system's real configuration, so results are recorded but
+        stale-state cleanup is skipped.
         """
+        reported_task_ids = set()
         for task_data in data.get("tasks", []):
             HealthCheckProcessor._process_task_result(
                 system, task_data, status_report_id, report_timestamp, db
             )
+            task_id = task_data.get("task_id") or task_data.get("name")
+            if task_id:
+                reported_task_ids.add(task_id)
 
+        reported_child_ids = set()
         for dep_data in data.get("dependencies", []):
             if not isinstance(dep_data, dict):
                 continue
             child = HealthCheckProcessor._resolve_nested_system(system, dep_data, agent_id, db)
+            reported_child_ids.add(child.id)
+            ancestor_ref = _is_ancestor_or_self(db, child.id, system)
             HealthCheckProcessor._process_system_report(
-                child, dep_data, status_report_id, report_timestamp, agent_id, db
+                child,
+                dep_data,
+                status_report_id,
+                report_timestamp,
+                agent_id,
+                db,
+                prune_stale=not ancestor_ref,
+            )
+
+        # The report mirrors the agent's current configuration: drop tasks and
+        # dependency links it no longer contains so removed entries stop
+        # influencing status (stale rows would otherwise pin systems DOWN).
+        if prune_stale:
+            HealthCheckProcessor._prune_stale_state(
+                system, reported_task_ids, reported_child_ids, db
             )
 
         db.flush()
+
+    @staticmethod
+    def _prune_stale_state(
+        system: System,
+        reported_task_ids: set,
+        reported_child_ids: set,
+        db: Session,
+    ) -> None:
+        """
+        Remove tasks and dependency links of ``system`` that the latest report
+        no longer contains.
+
+        Only the links (and task rows) are dropped; auto-created child systems
+        are kept, since another agent may report them independently.
+        """
+        task_query = db.query(Task).filter(Task.system_id == system.id)
+        if reported_task_ids:
+            task_query = task_query.filter(~Task.task_id.in_(reported_task_ids))
+        for task in task_query.all():
+            db.query(TaskResult).filter(TaskResult.task_id == task.id).delete()
+            db.delete(task)
+            logger.info(
+                f"Removed task '{task.task_id}' from {system.system_id}: "
+                "no longer present in the latest report"
+            )
+
+        link_query = db.query(SystemDependency).filter(
+            SystemDependency.parent_system_id == system.id
+        )
+        if reported_child_ids:
+            link_query = link_query.filter(
+                ~SystemDependency.child_system_id.in_(reported_child_ids)
+            )
+        for link in link_query.all():
+            db.delete(link)
+            logger.info(
+                f"Removed dependency link {system.system_id} -> {link.child_system_id}: "
+                "no longer present in the latest report"
+            )
 
     @staticmethod
     def _process_task_result(

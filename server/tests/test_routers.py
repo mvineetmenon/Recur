@@ -577,12 +577,13 @@ class TestStatusRoutes:
         response = client.post("/api/v1/status", json=self._report(agent_id="unknown-agent"))
         assert response.status_code == 404
 
-    def test_submit_status_report_unknown_system(self, client):
-        """Test status report for unknown system returns 400"""
+    def test_submit_status_report_unknown_system_auto_registers(self, client):
+        """Test first report for an unknown system registers it (200)"""
         payload = self._report()
         payload["system_status"]["system_id"] = "no-such-system"
         response = client.post("/api/v1/status", json=payload)
-        assert response.status_code == 400
+        assert response.status_code == 200
+        assert client.get("/api/v1/systems/no-such-system").status_code == 200
 
     def test_submit_status_report_missing_system_id(self, client):
         """A report with neither system_id nor name is rejected (400)"""
