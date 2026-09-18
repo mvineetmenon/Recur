@@ -17,6 +17,11 @@ A 5-minute path to a running agent is in [QUICK_START.md](QUICK_START.md).
   a systemd service; runs on air-gapped hosts with no pip or OS package access
 - **Self-Registering Topology** — agents register themselves, and the server
   registers the systems they report automatically (see [How It Works](#how-it-works))
+- **Authenticated Agents** — every agent holds a per-agent bearer token issued
+  at registration (only a hash is stored server-side); report and heartbeat
+  calls are verified, cross-agent impersonation is rejected, and new
+  registrations can be gated behind an enrollment token (see
+  [Agent Authentication](#agent-authentication))
 - **Web Dashboard** — auto-refreshing status board with a semantic dependency
   tree per system
 - **Multiple Health Check Types** — HTTP/HTTPS, TCP ports, ICMP ping, shell
@@ -44,7 +49,9 @@ Agents (Remote Machines)              Central Server (FastAPI)         Dashboard
 ```
 
 Each agent loops: read `config.yaml`, run every check, evaluate the tree,
-`POST` the JSON report, heartbeat, sleep for the configured interval.
+`POST` the JSON report, heartbeat, sleep for the configured interval. Every
+agent call is sent with its per-agent bearer token, which it receives on first
+registration (see [Agent Authentication](#agent-authentication)).
 
 ### Agents, Systems, and Reports
 
@@ -53,7 +60,7 @@ explicitly:
 
 | Entity | What it is | Defined by | How it reaches the server |
 |---|---|---|---|
-| **Agent** | the monitoring client on a host (*who is reporting*) | the host itself (`/etc/recur/`) | registers itself on startup: `POST /api/v1/agents/register` |
+| **Agent** | the monitoring client on a host (*who is reporting*) | the host itself (`/etc/recur/`) | registers itself on startup: `POST /api/v1/agents/register`, which issues the bearer token it stores in `/etc/recur/agent.token` |
 | **System** | a monitored topology: tasks + nested dependencies (*what is monitored*) | the agent's `config.yaml` | auto-registered by the server on the agent's **first report** |
 | **Report** | the results of one check cycle — a recursive JSON tree | produced by the agent each cycle | `POST /api/v1/status` |
 
@@ -84,6 +91,33 @@ Evaluation happens server-side on every report and rolls up bottom-up:
 
 The same rules run inside the agent before each report, so the submitted tree
 is already consistent.
+
+### Agent Authentication
+
+Agent↔server traffic is authenticated with per-agent bearer tokens:
+
+1. **Issuance.** The first `POST /agents/register` for an agent returns a
+   random 256-bit token exactly once (`agent_token` in the response). The
+   agent stores it in `/etc/recur/agent.token` (mode `0600`); the server
+   stores only its SHA-256 hash — the plaintext is never persisted.
+2. **Use.** Every subsequent agent call sends `Authorization: Bearer
+   <token>`. `POST /status` and `PUT /agents/{id}/heartbeat` require it, and
+   the token's owner must match the `agent_id` claimed — nobody on the
+   network can report for or heartbeat as another agent.
+3. **Enrollment.** When `RECUR_ENROLLMENT_TOKEN` is set on the server, new
+   registrations are additionally gated: the agent must present it (from
+   `RECUR_AGENT_ENROLLMENT_TOKEN`) as an `X-Recur-Enrollment-Token` header.
+   Agents that already hold a valid token re-register without it. When unset,
+   registration is open (dev mode) and the server logs a warning for every
+   open registration.
+4. **Rotation & self-healing.** Re-registration rotates the token and
+   returns the new plaintext. The agent does this automatically on any
+   `401`/`403` (deleting the old token file first), so a lost, stale, or
+   rotated token recovers on the next cycle — no restart required.
+
+Known limits and the remaining hardening roadmap (TLS, admin-endpoint
+auth, request signing, rate limiting) are tracked in
+[SECURITY_TODO.md](SECURITY_TODO.md).
 
 ## Installation
 
@@ -126,7 +160,8 @@ docker compose up -d --build        # or: make run-docker
   JSONB).
 - `docker compose --profile production up -d` additionally starts Redis.
 - All host ports, the database password, and the container's runtime settings
-  (`DEBUG`, `LOG_LEVEL`, `CORS_ORIGINS`) are configured in `.env` — see
+  (`DEBUG`, `LOG_LEVEL`, `CORS_ORIGINS`, `RECUR_ENROLLMENT_TOKEN`) are
+  configured in `.env` — see
   [Environment Variables](#environment-variables). One-off overrides still
   work inline, e.g. `RECUR_HTTP_PORT=9000 DB_PASSWORD=secret docker compose up -d`.
 
@@ -172,6 +207,9 @@ The installer lays down:
   (created once; edits stick)
 - `/etc/systemd/system/recur-agent.service`
 
+(`/etc/recur/agent.token` is *not* created by the installer — the agent writes
+it itself, mode `0600`, on its first successful registration.)
+
 Then finish the setup on that machine:
 
 ```bash
@@ -180,6 +218,11 @@ sudo vim /etc/recur/config.yaml
 
 # If the server is not on this host: point the agent at it
 #   /etc/recur/agent.env -> RECUR_AGENT_SERVER_URL=http://your-server:8000
+
+# If the server gates new registrations (RECUR_ENROLLMENT_TOKEN is set on
+# the server), hand the agent the enrollment token:
+#   /etc/recur/agent.env -> RECUR_AGENT_ENROLLMENT_TOKEN=<enrollment token>
+
 sudo systemctl daemon-reload
 
 # Start the agent
@@ -222,15 +265,16 @@ cp .env.example .env
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///./recur.db` (standalone); derived from `DB_PASSWORD` (docker) | SQLAlchemy database URL, e.g. `postgresql+psycopg2://recur:secret@db.example.com:5432/recur` |
-| `DEBUG` | `false` | `true` enables debug logging and uvicorn auto-reload; keep `false` in production |
+| `DEBUG` | `false` | `true` enables debug logging and uvicorn auto-reload; keep `false` in production (also exposes `/docs` and `/openapi.json`) |
 | `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
-| `CORS_ORIGINS` | `*` | Comma-separated allowed origins; `*` allows all (dev default) |
+| `CORS_ORIGINS` | *(empty)* | Comma-separated allowed origins; empty disables CORS entirely (the dashboard is same-origin and needs none); `*` allows all origins |
+| `RECUR_ENROLLMENT_TOKEN` | *(empty)* | Pre-shared token required for **new** agent registrations when set; empty = open registration (dev mode, logs a warning per registration). See [Agent Authentication](#agent-authentication) |
 
 ### Server (standalone only)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `HOST` | `0.0.0.0` | Interface the server binds to (not used in docker mode) |
+| `HOST` | `127.0.0.1` | Interface the server binds to (not used in docker mode); the standalone default is loopback — put a reverse proxy in front for network access |
 | `PORT` | `8000` | Port the server listens on (in docker mode the container always listens on `8000`; map the host port with `RECUR_HTTP_PORT`) |
 
 ### Docker Compose (host side only)
@@ -250,6 +294,8 @@ cp .env.example .env
 | `RECUR_AGENT_CONFIG_FILE` | `/etc/recur/config.yaml` | YAML file with the system, tasks, and dependencies to check |
 | `RECUR_AGENT_LOG_FILE` | `/var/log/recur-agent.log` | Agent log file (systemd installs use `/var/log/recur/agent.log`) |
 | `RECUR_AGENT_ENV_FILE` | `./.env` | `.env` file loaded when running the agent directly (systemd uses `/etc/recur/agent.env` instead) |
+| `RECUR_AGENT_TOKEN_FILE` | `/etc/recur/agent.token` | Where the agent stores its server-issued bearer token (written mode `0600`; never commit it) |
+| `RECUR_AGENT_ENROLLMENT_TOKEN` | *(empty)* | Bootstrap token for first registration when the server requires `RECUR_ENROLLMENT_TOKEN` |
 
 ## YAML Configuration
 
@@ -328,17 +374,24 @@ report.
 
 All endpoints are under `/api/v1`. `scripts/api-examples.sh` runs a full tour.
 
+Agent-facing endpoints are authenticated — see
+[Agent Authentication](#agent-authentication). `POST /status` and
+`PUT /agents/{agent_id}/heartbeat` require the agent's bearer token
+(`Authorization: Bearer <token>`); `POST /agents/register` issues it and,
+when `RECUR_ENROLLMENT_TOKEN` is set, requires the enrollment token for new
+agents.
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Server health |
-| `POST` | `/agents/register` | Register an agent (agents do this themselves on startup) |
+| `POST` | `/agents/register` | Register an agent (agents do this themselves on startup); issues/rotates its bearer token; new agents gated by the enrollment token when set |
 | `GET` | `/agents` | List agents (`skip`, `limit`) |
 | `GET` | `/agents/{agent_id}` | Agent details |
 | `GET` | `/agents/{agent_id}/systems` | Systems reported by the agent |
 | `POST` | `/agents/{agent_id}/check` | Request an immediate check (agent acts on its next interval) |
-| `PUT` | `/agents/{agent_id}/heartbeat` | Agent heartbeat |
+| `PUT` | `/agents/{agent_id}/heartbeat` | Agent heartbeat (requires the agent's token) |
 | `DELETE` | `/agents/{agent_id}` | Remove agent |
-| `POST` | `/status` | Submit a status report (what agents do automatically; auto-registers unknown systems) |
+| `POST` | `/status` | Submit a status report (what agents do automatically; requires the agent's token and an `agent_id` matching its owner; auto-registers unknown systems) |
 | `POST` | `/systems` | Create a system (optional — the agent's first report registers it) |
 | `GET` | `/systems` | List systems (`skip`, `limit`) |
 | `GET` | `/systems/forest` | All systems as a forest of dependency trees |
@@ -352,7 +405,11 @@ All endpoints are under `/api/v1`. `scripts/api-examples.sh` runs a full tour.
 ### Examples
 
 ```bash
-# Register an agent (agents do this themselves on startup)
+# Register an agent (agents do this themselves on startup).
+# The first registration returns the agent's bearer token exactly once:
+#   {"agent_id": "prod-web-01", ..., "agent_token": "<256-bit token>"}
+# The agent stores it in /etc/recur/agent.token (0600) and sends it as
+# "Authorization: Bearer <token>" on every later call.
 curl -X POST http://localhost:8000/api/v1/agents/register \
   -H "Content-Type: application/json" \
   -d '{"agent_id":"prod-web-01","hostname":"prod-web-01","ip_address":"10.0.1.42"}'
@@ -378,9 +435,11 @@ curl -X POST http://localhost:8000/api/v1/systems \
     }
   }'
 
-# Submit a status report (what agents do automatically)
+# Submit a status report (what agents do automatically; requires the
+# agent's bearer token)
 curl -X POST http://localhost:8000/api/v1/status \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <agent token>" \
   -d '{
     "agent_id": "prod-web-01",
     "timestamp": "2026-09-06T10:30:00Z",
@@ -418,6 +477,7 @@ curl -X POST http://localhost:8000/api/v1/agents/prod-web-01/check
 Recur/
 ├── README.md                  # This file
 ├── QUICK_START.md             # 5-minute getting started
+├── SECURITY_TODO.md           # Security hardening roadmap & status
 ├── .env.example               # Documented environment template (all run modes)
 ├── Makefile
 ├── pyproject.toml
@@ -432,6 +492,7 @@ Recur/
 │   │   ├── models.py          # Database models
 │   │   ├── database.py        # SQLAlchemy setup
 │   │   ├── schemas.py         # Pydantic schemas
+│   │   ├── security.py        # Bearer token + enrollment authentication
 │   │   ├── routers/           # API endpoints (agents, systems, status)
 │   │   ├── services/          # Business logic (report processing, evaluation)
 │   │   ├── utils/             # Utilities (YAML loading, logging)
@@ -492,8 +553,10 @@ Logs: the server writes one file per module under `server/logs/` (e.g.
 - [ ] Create `.env` from `.env.example` and review all values (see
       [Environment Variables](#environment-variables))
 - [ ] Set a strong `DB_PASSWORD` (or point `DATABASE_URL` at your own PostgreSQL)
-- [ ] Set `DEBUG=false`
-- [ ] Restrict CORS via `CORS_ORIGINS`
+- [ ] Set `DEBUG=false` (hides `/docs` and `/openapi.json`)
+- [ ] Set `RECUR_ENROLLMENT_TOKEN` so new agent registrations are gated
+      ([Agent Authentication](#agent-authentication))
+- [ ] Leave `CORS_ORIGINS` empty or restrict it (CORS is off by default)
 - [ ] Configure TLS/HTTPS certificates (reverse proxy)
 - [ ] Set up log aggregation
 - [ ] Configure monitoring and alerting (Recur itself can monitor the monitors)
@@ -535,11 +598,16 @@ PORT=8001 python -m server.app.main
 2. Verify configuration: `sudo cat /etc/recur/config.yaml`
 3. Test connectivity from the agent host to the server:
    `curl http://your-server:8000/api/v1/health`
-4. Reports are only accepted from **registered agents** — the agent registers
-   itself on startup, so after deleting an agent from the server, restart the
-   agent to re-register it. The system it reports does **not** need to be
-   pre-created; the first report registers it
-   ([How It Works](#agents-systems-and-reports)).
+4. Look for `401`/`403` in the agent log (auth failures): the agent deletes
+   its token file and re-registers automatically on the next cycle. If the
+   server gates new registrations and the agent no longer holds a valid
+   token, set `RECUR_AGENT_ENROLLMENT_TOKEN` in `/etc/recur/agent.env`, then
+   `sudo systemctl daemon-reload`.
+5. Reports are only accepted from **registered agents** — the agent
+   self-heals after being deleted from the server (it re-registers on the
+   next cycle and the server rotates its token); a restart also works. The
+   system it reports does **not** need to be pre-created; the first report
+   registers it ([How It Works](#agents-systems-and-reports)).
 
 ### All checks showing as DOWN
 

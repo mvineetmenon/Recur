@@ -67,7 +67,8 @@ sudo systemctl enable recur-agent
 Everything else is automatic:
 
 1. **The agent registers itself** with the server on startup
-   (`POST /api/v1/agents/register`) and heartbeats every cycle.
+   (`POST /api/v1/agents/register`), receives its bearer token (stored in
+   `/etc/recur/agent.token`), and heartbeats every cycle.
 2. **Its system is auto-registered** by the server on the first status report
    — no API call needed. Nested dependencies in the config are registered the
    same way. (You can still pre-create a system with
