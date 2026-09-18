@@ -1,27 +1,28 @@
 # Quick Start - Recur
 
-Get up and running in 5 minutes. For full documentation, see [README.md](README.md).
+Get a server and an agent talking in 5 minutes. Everything in detail is in
+[README.md](README.md).
 
 ## Prerequisites
 
-- **Standalone:** Python 3.12+, curl, git
-- **Dockerized:** Docker Engine with the Compose plugin
+- **Server (standalone):** Python 3.12+, curl, git
+- **Server (dockerized):** Docker Engine with the Compose plugin
+- **Agent:** Python 3 only — PyYAML is vendored with the agent, so no pip or
+  OS package access is needed (works on air-gapped hosts)
 
-## 1. Install the Server (pick one)
+## 1. Start the Server
 
-### Option A: Standalone (source + venv)
+Pick one:
 
 ```bash
+# Option A: standalone (source + venv, SQLite)
 git clone https://github.com/mvineetmenon/Recur.git
 cd Recur
 ./scripts/install-server.sh
 source venv/bin/activate
 python -m server.app.main
-```
 
-### Option B: Dockerized
-
-```bash
+# Option B: dockerized (server + PostgreSQL)
 git clone https://github.com/mvineetmenon/Recur.git
 cd Recur
 docker compose up -d --build
@@ -33,94 +34,78 @@ Either way:
 - Dashboard: `http://localhost:8000/dashboard`
 - Health: `http://localhost:8000/api/v1/health`
 
-Option A uses SQLite (`./recur.db`); Option B runs PostgreSQL alongside the
-server (JSON columns stored as JSONB).
-
 ## 2. Install an Agent
 
-On each machine you want to monitor, either:
+On each machine you want to monitor:
 
 ```bash
 # Option A: one-liner (downloads the agent files from the repository)
 curl -s https://raw.githubusercontent.com/mvineetmenon/Recur/main/agent/install.sh | sudo bash
 
-# Option B: from a local checkout (no download of agent files)
+# Option B: from a local checkout (no download)
 git clone https://github.com/mvineetmenon/Recur.git && cd Recur && sudo ./agent/install.sh
 ```
 
-Then:
+Then point it at your server and start it:
 
 ```bash
 # Edit the configuration
 sudo vim /etc/recur/config.yaml
 
-# If the server is not on this host, point the agent at it
-# (uncomment in /etc/recur/agent.env, then: sudo systemctl daemon-reload)
+# If the server is not on this host: set it in /etc/recur/agent.env
 #   RECUR_AGENT_SERVER_URL=http://your-server:8000
+# then:
+sudo systemctl daemon-reload
 
 # Start the agent
 sudo systemctl start recur-agent
 sudo systemctl enable recur-agent
 ```
 
-## 3. Try the API
+## 3. What Happens Next
+
+Everything else is automatic:
+
+1. **The agent registers itself** with the server on startup
+   (`POST /api/v1/agents/register`) and heartbeats every cycle.
+2. **Its system is auto-registered** by the server on the first status report
+   — no API call needed. Nested dependencies in the config are registered the
+   same way. (You can still pre-create a system with
+   `POST /api/v1/systems` to pin its description/config first.)
+3. **Config edits are picked up on the next check cycle** — the agent reloads
+   `config.yaml` live, and the server treats each report as the current
+   configuration: added tasks appear, removed tasks/dependencies are pruned
+   (so a removed task can no longer keep the system DOWN).
+
+Full explanation: [README — How It Works](README.md#how-it-works).
+
+## 4. Verify It Works
 
 ```bash
-# Register an agent
-curl -X POST http://localhost:8000/api/v1/agents/register \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id":"my-agent","hostname":"my-host","ip_address":"192.168.1.100"}'
+# Server is up
+curl http://localhost:8000/api/v1/health
 
-# Create a system
-curl -X POST http://localhost:8000/api/v1/systems \
-  -H "Content-Type: application/json" \
-  -d '{
-    "system_id": "my-system",
-    "name": "My System",
-    "description": "My test system",
-    "config": {
-      "name": "My System",
-      "tasks": [
-        {
-          "name": "web_health",
-          "type": "http",
-          "url": "http://example.com",
-          "expected_status": 200,
-          "timeout": 5
-        }
-      ]
-    }
-  }'
+# The system tree (replace the id; the agent's config "name" is slugged,
+# e.g. "Local Services" -> local-services)
+curl http://localhost:8000/api/v1/systems/local-services/tree
 
-# Submit a status report (what agents do automatically)
-curl -X POST http://localhost:8000/api/v1/status \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agent_id": "my-agent",
-    "timestamp": "2026-09-06T10:00:00Z",
-    "system_status": {
-      "system_id": "my-system",
-      "name": "My System",
-      "status": "UP",
-      "tasks": [
-        {"task_id": "web_health", "name": "web_health", "type": "http", "status": "UP", "duration_ms": 150}
-      ],
-      "dependencies": []
-    }
-  }'
+# Request an immediate check (agent id = RECUR_AGENT_ID, or the hostname
+# when unset; find it in the dashboard or `GET /api/v1/agents`)
+curl -X POST http://localhost:8000/api/v1/agents/agent-01/check
 
-# Get the dependency tree
-curl http://localhost:8000/api/v1/systems/my-system/tree
+# Agent side (on the agent host)
+sudo tail -f /var/log/recur/agent.log
 ```
 
-## 4. Write a Config
+Then open the dashboard: `http://localhost:8000/dashboard`.
 
-Example `my-config.yaml` — tasks plus nested dependencies:
+## 5. Write a Config
+
+`/etc/recur/config.yaml` on each agent:
 
 ```yaml
 system:
   name: "My App"
-  description: "My application stack"
   interval: 60
   tasks:
     - name: "api_health"
@@ -136,104 +121,53 @@ system:
           host: "db.internal"
           port: 5432
           timeout: 3
-    - name: "Cache"
-      tasks:
-        - name: "redis_port"
-          type: tcp
-          host: "cache.internal"
-          port: 6379
-          timeout: 3
 ```
 
-Task types (see [README.md](README.md#yaml-configuration) for full details):
-
-| Type | Key Fields |
-|------|------------|
-| `http` / `https` | `url`, `expected_status`, `timeout` |
-| `tcp` | `host`, `port`, `timeout` |
-| `ping` | `host`, `timeout` |
-| `command` | `command` (exit 0 = success), `timeout` |
-| `script` | `path`, `timeout` |
-
-## 5. Key Concepts
-
-**Recursive status evaluation** - a system is **UP** only if all of its tasks are UP *and* all of its dependencies (recursively) are UP. Any DOWN task or dependency makes the whole system **DOWN**.
-
-**Agent workflow** - read YAML config, run all checks, evaluate dependencies recursively, push the JSON report to the server, repeat on the configured interval. The server stores history and the dashboard auto-refreshes.
+Task types: `http`/`https`, `tcp`, `ping`, `command`, `script` — field
+reference, nested examples, and production configs in
+[README — YAML Configuration](README.md#yaml-configuration) and in
+[configs/](configs/).
 
 ## 6. Common Tasks
 
 ```bash
 # Trigger a manual check on an agent
-curl -X POST http://localhost:8000/api/v1/agents/my-agent/check
+curl -X POST http://localhost:8000/api/v1/agents/agent-01/check
 
 # Get agent status
-curl http://localhost:8000/api/v1/agents/my-agent
+curl http://localhost:8000/api/v1/agents/agent-01
 
-# Delete a system
-curl -X DELETE http://localhost:8000/api/v1/systems/my-system
+# Delete a system (also when you rename a system's id)
+curl -X DELETE http://localhost:8000/api/v1/systems/local-services
 
-# Register multiple agents at once
-for i in {1..5}; do
-  curl -X POST http://localhost:8000/api/v1/agents/register \
-    -H "Content-Type: application/json" \
-    -d "{\"agent_id\":\"agent-$i\",\"hostname\":\"host-$i\",\"ip_address\":\"192.168.1.$i\"}"
-done
+# Uninstall the agent (on the agent host)
+sudo ./agent/uninstall.sh        # add -y to skip the prompt, -k to keep /etc/recur
 ```
 
-## 7. Troubleshooting
+Full API reference: [README — REST API](README.md#rest-api) (or run
+`scripts/api-examples.sh`).
 
-### Server won't start
+## 7. Troubleshooting (short version)
 
-```bash
-# Port 8000 already in use?
-lsof -i :8000
+- **No reports from the agent** — `sudo tail -f /var/log/recur/agent.log`;
+  check `RECUR_AGENT_SERVER_URL` in `/etc/recur/agent.env`; test
+  `curl http://your-server:8000/api/v1/health` from the agent host.
+- **All tasks DOWN** — the targets must be reachable *from the agent host*;
+  check firewalls and timeouts.
+- **Server won't start** — port 8000 in use? `lsof -i :8000`; start with
+  `PORT=8001 python -m server.app.main`.
+- **Dashboard not loading** — `curl http://localhost:8000/api/v1/health`;
+  check `server/logs/server_app_main.log`.
 
-# Start on a different port
-PORT=8001 python -m server.app.main
-```
-
-### Agent can't connect to server
-
-```bash
-# Test connectivity from the agent host
-curl http://your-server:8000/api/v1/health
-
-# Firewall / agent config
-sudo ufw allow 8000
-sudo cat /etc/recur/config.yaml
-```
-
-### Tasks always report DOWN
-
-- Check that the targets are reachable from the agent host
-- Verify timeouts are appropriate
-- Check firewall rules on the targets
-- Review agent logs: `sudo tail -f /var/log/recur/agent.log`
-
-More in [README.md - Troubleshooting](README.md#troubleshooting).
-
-## Development
-
-```bash
-make test      # run the test suite
-make format    # black + isort
-make lint      # black --check + flake8 + mypy
-
-# Server logs (one file per module)
-tail -f server/logs/server_app_main.log
-
-# Agent logs (systemd install; script default is /var/log/recur-agent.log)
-sudo tail -f /var/log/recur/agent.log
-```
+More in [README — Troubleshooting](README.md#troubleshooting).
 
 ## Next Steps
 
-- [README.md](README.md) - complete documentation
-- [configs/](configs/) - production-ready examples
-- [agent/](agent/) - agent internals and customization
-- [server/app/](server/app/) - API and business logic
+- [README.md](README.md) — complete documentation
+- [configs/](configs/) — production-ready example configurations
+- [agent/](agent/) — agent internals and customization
+- [server/app/](server/app/) — API and business logic
 
 ---
 
-**Need help?** Check the troubleshooting section above or open an issue on GitHub.
+**Need help?** Open an issue on GitHub.
